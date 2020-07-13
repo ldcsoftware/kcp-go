@@ -5,7 +5,9 @@ package kcp
 import (
 	"net"
 	"os"
+	"strconv"
 	"sync/atomic"
+	"time"
 
 	"golang.org/x/net/ipv4"
 )
@@ -15,6 +17,15 @@ func (t *UDPTunnel) writeBatch(msgs []ipv4.Message) {
 	nbytes := 0
 	npkts := 0
 	for len(msgs) > 0 {
+		lastBuffer := msgs[len(msgs)-1].Buffers[0]
+		if lastBuffer[len(lastBuffer)-1] == '.' {
+			if len(lastBuffer) < 41 {
+				panic("writeBatch wrong msg")
+			} else {
+				writeTime := strconv.FormatInt(time.Now().UnixNano(), 10)
+				copy(lastBuffer[len(lastBuffer)-40:], []byte(writeTime))
+			}
+		}
 		if n, err := t.xconn.WriteBatch(msgs, 0); err == nil {
 			for k := range msgs[:n] {
 				nbytes += len(msgs[k].Buffers[0])
@@ -43,6 +54,7 @@ func (t *UDPTunnel) writeBatch(msgs []ipv4.Message) {
 }
 
 func (t *UDPTunnel) writeLoop() {
+	t.defaultWriteLoop()
 	// default version
 	if t.xconn == nil || t.xconnWriteError != nil {
 		t.defaultWriteLoop()

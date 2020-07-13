@@ -5,6 +5,8 @@ import (
 	"log"
 	"net"
 	"os"
+	"strconv"
+	"time"
 )
 
 func checkError(err error) {
@@ -20,12 +22,22 @@ func handleEcho(conn *net.TCPConn) {
 
 	defer conn.Close()
 
+	var lastPacketTime int64
+
 	buf := make([]byte, 4096)
 	for {
 		n, err := conn.Read(buf)
 		if err != nil {
 			log.Println(err)
 			return
+		}
+
+		if buf[n-1] == '.' {
+			lastPacketTime = time.Now().UnixNano()
+
+			info := "-" + strconv.FormatInt(lastPacketTime, 10) + "."
+			copy(buf[n-1:], []byte(info))
+			n += (len(info) - 1)
 		}
 
 		n, err = conn.Write(buf[:n])

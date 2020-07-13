@@ -57,39 +57,72 @@ func checkError(err error) {
 	}
 }
 
-func toUdpStreamBridge(dst *kcp.UDPStream, src *net.TCPConn) (wcount int, wcost float64, err error) {
+func toUdpStreamBridge(dst *kcp.UDPStream, src *net.TCPConn) (wcount int, wcost float64, msgCount int, passTAll float64, err error) {
 	buf := bufPool.Get().(*[]byte)
 	defer bufPool.Put(buf)
 
+	var lastPacketTime int64
+
 	for {
+		start := 0
 		n, err := src.Read(*buf)
 		if err != nil {
 			kcp.Logf(kcp.ERROR, "toUdpStreamBridge reading err:%v n:%v", err, n)
-			return wcount, wcost, err
+			return wcount, wcost, msgCount, passTAll, err
+		}
+
+		//1
+		if (*buf)[n-1] == '.' {
+			lastPacketTime = time.Now().UnixNano()
+
+			sendTimeTmp := string((*buf)[n-1-19 : n-1])
+			sendTime, _ := strconv.ParseFloat(sendTimeTmp, 64)
+			passTAll += (float64(lastPacketTime) - sendTime) / 1000 / 1000
+			msgCount += 1
+
+			info := "-" + strconv.FormatInt(lastPacketTime, 10)
+			info += "-" + "xxxxxxxxxxxxxxxxxxx" + "-" + "xxxxxxxxxxxxxxxxxxx" + "-" + "xxxxxxxxxxxxxxxxxxx" + "."
+			copy((*buf)[n-1:], []byte(info))
+			n += (len(info) - 1)
 		}
 
 		wstart := time.Now()
-		_, err = dst.Write((*buf)[:n])
+		_, err = dst.Write((*buf)[start:n])
 		wcosttmp := time.Since(wstart)
 		wcost += float64(wcosttmp.Nanoseconds()) / (1000 * 1000)
 		wcount += 1
 		if err != nil {
 			kcp.Logf(kcp.ERROR, "toUdpStreamBridge writing err:%v", err)
-			return wcount, wcost, err
+			return wcount, wcost, msgCount, passTAll, err
 		}
 	}
-	return wcount, wcost, nil
+	return wcount, wcost, msgCount, passTAll, nil
 }
 
 func toTcpStreamBridge(dst *net.TCPConn, src *kcp.UDPStream) (wcount int, wcost float64, err error) {
 	buf := bufPool.Get().(*[]byte)
 	defer bufPool.Put(buf)
 
+	var lastPacketTime int64
+
 	for {
 		n, err := src.Read(*buf)
 		if err != nil {
 			kcp.Logf(kcp.ERROR, "toTcpStreamBridge reading err:%v n:%v", err, n)
 			return wcount, wcost, err
+		}
+
+		if n == 0 {
+			continue
+		}
+
+		//2
+		if (*buf)[n-1] == '.' {
+			lastPacketTime = time.Now().UnixNano()
+
+			info := "-" + strconv.FormatInt(lastPacketTime, 10) + "."
+			copy((*buf)[n-1:], []byte(info))
+			n += (len(info) - 1)
 		}
 
 		wstart := time.Now()
@@ -109,11 +142,22 @@ func iobridge(dst io.Writer, src io.Reader) (wcount int, wcost float64, err erro
 	buf := bufPool.Get().(*[]byte)
 	defer bufPool.Put(buf)
 
+	var lastPacketTime int64
+
 	for {
 		n, err := src.Read(*buf)
 		if err != nil {
 			kcp.Logf(kcp.ERROR, "iobridge reading err:%v n:%v", err, n)
 			return wcount, wcost, err
+		}
+
+		//2
+		if (*buf)[n-1] == '.' {
+			lastPacketTime = time.Now().UnixNano()
+
+			info := "-" + strconv.FormatInt(lastPacketTime, 10) + "."
+			copy((*buf)[n-1:], []byte(info))
+			n += (len(info) - 1)
 		}
 
 		wstart := time.Now()
@@ -180,8 +224,18 @@ func handleClient(s *kcp.UDPStream, conn *net.TCPConn) {
 
 	// start tunnel & wait for tunnel termination
 	toUDPStream := func(s *kcp.UDPStream, conn *net.TCPConn, shutdown chan struct{}) {
-		wcount, wcost, err := toUdpStreamBridge(s, conn)
-		kcp.Logf(kcp.INFO, "toUDPStream stream:%v remote:%v wcount:%v wcost:%v err:%v", s.GetUUID(), conn.RemoteAddr(), wcount, wcost, err)
+		wcount, wcost, msgcount, passTAll, err := toUdpStreamBridge(s, conn)
+
+		var wAvg float64
+		var passAvg float64
+		if wcount != 0 {
+			wAvg = wcost / float64(wcount)
+		}
+		if msgcount != 0 {
+			passAvg = passTAll / float64(msgcount)
+		}
+
+		kcp.Logf(kcp.INFO, "toUDPStream stream:%v remote:%v wcount:%v wAvg:%v msgcount:%v passAvg:%v err:%v", s.GetUUID(), conn.RemoteAddr(), wcount, wAvg, msgcount, passAvg, err)
 		shutdown <- struct{}{}
 	}
 
@@ -362,13 +416,13 @@ func main() {
 		}
 
 		locals := []string{}
-		for i := 0; i < transmitTuns; i++ {
-			locals = append(locals, localIp+":"+strconv.Itoa(localPortS+i))
+		for portS := localPortS; portS <= localPortE; portS++ {
+			locals = append(locals, localIp+":"+strconv.Itoa(portS))
 		}
 
 		remotes := []string{}
-		for i := 0; i < transmitTuns; i++ {
-			remotes = append(remotes, remoteIp+":"+strconv.Itoa(remotePortS+i))
+		for portS := remotePortS; portS <= remotePortE; portS++ {
+			remotes = append(remotes, remoteIp+":"+strconv.Itoa(portS))
 		}
 
 		addr, err := net.ResolveTCPAddr("tcp", listenAddr)
@@ -391,10 +445,25 @@ func main() {
 			}
 		}()
 
+		localIdx := 0
+		remoteIdx := 0
+
 		for {
 			conn, err := listener.AcceptTCP()
 			checkError(err)
-			stream, err := transport.Open(locals, remotes)
+
+			tunLocals := []string{}
+			for i := 0; i < transmitTuns; i++ {
+				tunLocals = append(tunLocals, locals[localIdx%len(locals)])
+				localIdx++
+			}
+			tunRemotes := []string{}
+			for i := 0; i < transmitTuns; i++ {
+				tunRemotes = append(tunRemotes, remotes[remoteIdx%len(remotes)])
+				remoteIdx++
+			}
+			stream, err := transport.Open(tunLocals, tunRemotes)
+			// stream, err := transport.Open(locals[:transmitTuns], remotes[:transmitTuns])
 			stream.SetWindowSize(wndSize, wndSize)
 			checkError(err)
 			go handleClient(stream, conn)

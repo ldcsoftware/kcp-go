@@ -151,7 +151,6 @@ func (t *UDPTransport) NewStream(uuid gouuid.UUID, accepted bool, remotes []stri
 	}
 	if t.kcpOption != nil {
 		stream.SetNoDelay(t.kcpOption.nodelay, t.kcpOption.interval, t.kcpOption.resend, t.kcpOption.nc)
-		stream.SetACKNoDelay(t.kcpOption.ackNoDelay)
 	}
 	return stream, err
 }

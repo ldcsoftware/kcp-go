@@ -3,7 +3,9 @@ package kcp
 import (
 	"errors"
 	"io"
+	"math/rand"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -91,6 +93,8 @@ type (
 		parallelXmit   uint32
 		parallelTime   time.Duration
 		parallelExpire time.Time
+
+		T1 int64
 	}
 )
 
@@ -351,8 +355,8 @@ func (s *UDPStream) WriteBuffer(flag byte, b []byte, heartbeat bool) (n int, err
 	default:
 	}
 
-	// start := time.Now()
-	// randId := rand.Intn(10000)
+	start := time.Now()
+	randId := rand.Intn(10000)
 
 	for {
 		s.mu.Lock()
@@ -381,14 +385,14 @@ func (s *UDPStream) WriteBuffer(flag byte, b []byte, heartbeat bool) (n int, err
 			}
 			atomic.AddUint64(&DefaultSnmp.BytesSent, uint64(len(b)))
 
-			// cost := time.Since(start)
-			// Logf(DEBUG, "UDPStream::Write finish uuid:%v accepted:%v randId:%v waitsnd:%v snd_wnd:%v rmt_wnd:%v snd_buf:%v snd_queue:%v cost:%v len:%v", s.uuid, s.accepted, randId, waitsnd, s.kcp.snd_wnd, s.kcp.rmt_wnd, len(s.kcp.snd_buf), len(s.kcp.snd_queue), cost, len(b))
+			cost := time.Since(start)
+			Logf(DEBUG, "UDPStream::Write finish uuid:%v accepted:%v randId:%v waitsnd:%v snd_wnd:%v rmt_wnd:%v snd_buf:%v snd_queue:%v cost:%v len:%v", s.uuid, s.accepted, randId, waitsnd, s.kcp.snd_wnd, s.kcp.rmt_wnd, len(s.kcp.snd_buf), len(s.kcp.snd_queue), cost, len(b))
 			return len(b), nil
 		} else if heartbeat {
 			s.mu.Unlock()
 			return len(b), nil
 		}
-		// Logf(DEBUG, "UDPStream::Write block uuid:%v accepted:%v randId:%v waitsnd:%v snd_wnd:%v rmt_wnd:%v snd_buf:%v snd_queue:%v", s.uuid, s.accepted, randId, waitsnd, s.kcp.snd_wnd, s.kcp.rmt_wnd, len(s.kcp.snd_buf), len(s.kcp.snd_queue))
+		Logf(DEBUG, "UDPStream::Write block uuid:%v accepted:%v randId:%v waitsnd:%v snd_wnd:%v rmt_wnd:%v snd_buf:%v snd_queue:%v", s.uuid, s.accepted, randId, waitsnd, s.kcp.snd_wnd, s.kcp.rmt_wnd, len(s.kcp.snd_buf), len(s.kcp.snd_queue))
 
 		var timeout *time.Timer
 		var c <-chan time.Time
@@ -594,12 +598,14 @@ func (s *UDPStream) flush(kcpFlush bool) (interval uint32) {
 		s.notifyWriteEvent()
 	}
 
-	// Logf(DEBUG, "UDPStream::flush uuid:%v accepted:%v waitsnd:%v snd_wnd:%v rmt_wnd:%v msgss:%v notifyWrite:%v", s.uuid, s.accepted, waitsnd, s.kcp.snd_wnd, s.kcp.rmt_wnd, len(msgss), notifyWrite)
+	Logf(DEBUG, "UDPStream::flush uuid:%v accepted:%v waitsnd:%v snd_wnd:%v rmt_wnd:%v msgss:%v notifyWrite:%v", s.uuid, s.accepted, waitsnd, s.kcp.snd_wnd, s.kcp.rmt_wnd, len(msgss), notifyWrite)
 
 	//if tunnel output failure, can change tunnel or else ?
 	for i, msgs := range msgss {
 		if len(msgs) > 0 {
 			s.tunnels[i].output(msgs)
+			// s.tunnels[i].writeSingle(msgs)
+			// s.tunnels[i].releaseMsgss([][]ipv4.Message{msgs})
 		}
 	}
 	return
@@ -623,6 +629,14 @@ func (s *UDPStream) parallelTun(xmitMax uint32) (parallel int) {
 }
 
 func (s *UDPStream) output(buf []byte, xmitMax uint32) {
+	if buf[len(buf)-1] == '.' {
+		if len(buf) < 61 {
+			panic("output wrong msg")
+		} else {
+			outputTime := strconv.FormatInt(time.Now().UnixNano(), 10)
+			copy(buf[len(buf)-60:], []byte(outputTime))
+		}
+	}
 	appendCount := s.parallelTun(xmitMax)
 	for i := len(s.msgss); i < appendCount; i++ {
 		s.msgss = append(s.msgss, make([]ipv4.Message, 0))
@@ -639,7 +653,7 @@ func (s *UDPStream) output(buf []byte, xmitMax uint32) {
 }
 
 func (s *UDPStream) input(data []byte) {
-	// Logf(DEBUG, "UDPStream::input uuid:%v accepted:%v data:%v", s.uuid, s.accepted, len(data))
+	Logf(DEBUG, "UDPStream::input uuid:%v accepted:%v data:%v", s.uuid, s.accepted, len(data))
 
 	var kcpInErrors uint64
 
@@ -657,6 +671,11 @@ func (s *UDPStream) input(data []byte) {
 	}
 
 	kcpFlush := !s.writeDelay && len(s.kcp.snd_queue) != 0 && (s.kcp.snd_nxt < s.kcp.snd_una+s.kcp.calc_cwnd())
+
+	if len(data) > 1000 && s.T1 == 0 {
+		s.T1 = time.Now().UnixNano()
+	}
+
 	s.mu.Unlock()
 
 	s.flush(kcpFlush)

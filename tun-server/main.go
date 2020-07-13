@@ -59,15 +59,28 @@ func toUdpStreamBridge(dst *kcp.UDPStream, src *net.TCPConn) (wcount int, wcost 
 	buf := bufPool.Get().(*[]byte)
 	defer bufPool.Put(buf)
 
+	var lastPacketTime int64
+
 	for {
+		start := 0
 		n, err := src.Read(*buf)
 		if err != nil {
 			kcp.Logf(kcp.ERROR, "toUdpStreamBridge reading err:%v n:%v", err, n)
 			return wcount, wcost, err
 		}
 
+		//2
+		if (*buf)[n-1] == '.' {
+			lastPacketTime = time.Now().UnixNano()
+
+			info := "-" + strconv.FormatInt(lastPacketTime, 10)
+			info += "-" + "xxxxxxxxxxxxxxxxxxx" + "-" + "xxxxxxxxxxxxxxxxxxx" + "-" + "xxxxxxxxxxxxxxxxxxx" + "."
+			copy((*buf)[n-1:], []byte(info))
+			n += (len(info) - 1)
+		}
+
 		wstart := time.Now()
-		_, err = dst.Write((*buf)[:n])
+		_, err = dst.Write((*buf)[start:n])
 		wcosttmp := time.Since(wstart)
 		wcost += float64(wcosttmp.Nanoseconds()) / (1000 * 1000)
 		wcount += 1
@@ -83,11 +96,26 @@ func toTcpStreamBridge(dst *net.TCPConn, src *kcp.UDPStream) (wcount int, wcost 
 	buf := bufPool.Get().(*[]byte)
 	defer bufPool.Put(buf)
 
+	var lastPacketTime int64
+
 	for {
 		n, err := src.Read(*buf)
 		if err != nil {
 			kcp.Logf(kcp.ERROR, "toTcpStreamBridge reading err:%v n:%v", err, n)
 			return wcount, wcost, err
+		}
+
+		if n == 0 {
+			continue
+		}
+
+		//1
+		if (*buf)[n-1] == '.' {
+			lastPacketTime = time.Now().UnixNano()
+
+			info := "-" + strconv.FormatInt(lastPacketTime, 10) + "."
+			copy((*buf)[n-1:], []byte(info))
+			n += (len(info) - 1)
 		}
 
 		wstart := time.Now()
@@ -144,8 +172,12 @@ func (sel *TestSelector) Pick(remotes []string) (tunnels []*kcp.UDPTunnel) {
 
 // handleClient aggregates connection p1 on mux with 'writeLock'
 func handleClient(s *kcp.UDPStream, conn *net.TCPConn) {
+	var wCountAll int
+	var wCostAll float64
+	var wCostAvg float64
+
 	kcp.Logf(kcp.INFO, "handleClient start stream:%v remote:%v", s.GetUUID(), conn.RemoteAddr())
-	defer kcp.Logf(kcp.INFO, "handleClient end stream:%v remote:%v", s.GetUUID(), conn.RemoteAddr())
+	defer kcp.Logf(kcp.INFO, "handleClient end stream:%v remote:%v wCostAvg:%v", s.GetUUID(), conn.RemoteAddr(), wCostAvg)
 
 	defer conn.Close()
 	defer s.Close()
@@ -154,7 +186,9 @@ func handleClient(s *kcp.UDPStream, conn *net.TCPConn) {
 
 	// start tunnel & wait for tunnel termination
 	toUDPStream := func(s *kcp.UDPStream, conn *net.TCPConn, shutdown chan struct{}) {
-		_, _, err := toUdpStreamBridge(s, conn)
+		wcount, wcost, err := toUdpStreamBridge(s, conn)
+		wCountAll += wcount
+		wCostAll += wcost
 		kcp.Logf(kcp.INFO, "toUDPStream stream:%v remote:%v err:%v", s.GetUUID(), conn.RemoteAddr(), err)
 		shutdown <- struct{}{}
 	}
@@ -169,6 +203,10 @@ func handleClient(s *kcp.UDPStream, conn *net.TCPConn) {
 	go toTCPStream(conn, s, shutdown)
 
 	<-shutdown
+
+	if wCountAll != 0 {
+		wCostAvg = wCostAll / float64(wCountAll)
+	}
 }
 
 func main() {

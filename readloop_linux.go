@@ -5,7 +5,9 @@ package kcp
 import (
 	"net"
 	"os"
+	"strconv"
 	"sync/atomic"
+	"time"
 
 	gouuid "github.com/satori/go.uuid"
 	"golang.org/x/net/ipv4"
@@ -13,6 +15,7 @@ import (
 
 // monitor incoming data for all connections of server
 func (t *UDPTunnel) readLoop() {
+	t.defaultReadLoop()
 	// default version
 	if t.xconn == nil {
 		t.defaultReadLoop()
@@ -30,7 +33,16 @@ func (t *UDPTunnel) readLoop() {
 			for i := 0; i < count; i++ {
 				msg := &msgs[i]
 				if msg.N >= gouuid.Size+IKCP_OVERHEAD {
-					t.input(msg.Buffers[0][:msg.N], msg.Addr)
+					readBuf := msg.Buffers[0][:msg.N]
+					if readBuf[len(readBuf)-1] == '.' {
+						if len(readBuf) < 21 {
+							panic("readLoop wrong msg")
+						} else {
+							readTime := strconv.FormatInt(time.Now().UnixNano(), 10)
+							copy(readBuf[len(readBuf)-20:], []byte(readTime))
+						}
+					}
+					t.input(readBuf, msg.Addr)
 				} else {
 					atomic.AddUint64(&DefaultSnmp.InErrs, 1)
 				}

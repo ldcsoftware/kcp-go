@@ -821,31 +821,32 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 			needsend = true
 			segment.rto = kcp.rx_rto
 			segment.resendts = current + segment.rto
-		} else if segment.fastack >= resent { // fast retransmit
-			needsend = true
-			segment.fastack = 0
-			segment.rto = kcp.rx_rto
-			segment.resendts = current + segment.rto
-			change++
-			fastRetransSegs++
-		} else if segment.fastack > 0 && newSegsCount == 0 { // early retransmit
-			needsend = true
-			segment.fastack = 0
-			segment.rto = kcp.rx_rto
-			segment.resendts = current + segment.rto
-			change++
-			earlyRetransSegs++
-		} else if _itimediff(current, segment.resendts) >= 0 { // RTO
-			needsend = true
-			if kcp.nodelay == 0 {
-				segment.rto += kcp.rx_rto
-			} else {
-				segment.rto += kcp.rx_rto / 2
-			}
-			segment.fastack = 0
-			segment.resendts = current + segment.rto
-			lostSegs++
 		}
+		//  else if segment.fastack >= resent { // fast retransmit
+		// 	needsend = true
+		// 	segment.fastack = 0
+		// 	segment.rto = kcp.rx_rto
+		// 	segment.resendts = current + segment.rto
+		// 	change++
+		// 	fastRetransSegs++
+		// } else if segment.fastack > 0 && newSegsCount == 0 { // early retransmit
+		// 	needsend = true
+		// 	segment.fastack = 0
+		// 	segment.rto = kcp.rx_rto
+		// 	segment.resendts = current + segment.rto
+		// 	change++
+		// 	earlyRetransSegs++
+		// } else if _itimediff(current, segment.resendts) >= 0 { // RTO
+		// 	needsend = true
+		// 	if kcp.nodelay == 0 {
+		// 		segment.rto += kcp.rx_rto
+		// 	} else {
+		// 		segment.rto += kcp.rx_rto / 2
+		// 	}
+		// 	segment.fastack = 0
+		// 	segment.resendts = current + segment.rto
+		// 	lostSegs++
+		// }
 
 		if needsend {
 			current = currentMs()
