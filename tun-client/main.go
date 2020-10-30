@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -66,6 +68,20 @@ func toUdpStreamBridge(dst *kcp.UDPStream, src *net.TCPConn) (wcount int, wcost 
 		if err != nil {
 			kcp.Logf(kcp.ERROR, "toUdpStreamBridge reading err:%v n:%v", err, n)
 			return wcount, wcost, err
+		}
+
+		if n == 0 {
+			return 0, 0, nil
+		}
+
+		//1
+		if (*buf)[n-1] == '.' {
+			lastPacketTime := time.Now().UnixNano()
+
+			info := "-" + strconv.FormatInt(lastPacketTime, 10)
+			info += "-" + "xxxxxxxxxxxxxxxxxxx" + "-" + "xxxxxxxxxxxxxxxxxxx" + "-" + "xxxxxxxxxxxxxxxxxxx" + "-" + "xxxxxxxxxxxxxxxxxxx" + "."
+			copy((*buf)[n-1:], []byte(info))
+			n += (len(info) - 1)
 		}
 
 		wstart := time.Now()
@@ -145,25 +161,35 @@ func (poll *TunnelPoll) Pick() (tunnel *kcp.UDPTunnel) {
 
 type TestSelector struct {
 	remoteAddrs []net.Addr
-	tunnels     []*kcp.UDPTunnel
-	idx         uint32
+	loopPoll    TunnelPoll
+	otherPoll   TunnelPoll
 }
 
 func NewTestSelector() (*TestSelector, error) {
-	return &TestSelector{
-		tunnels: make([]*kcp.UDPTunnel, 0),
-	}, nil
+	return &TestSelector{}, nil
 }
 
 func (sel *TestSelector) Add(tunnel *kcp.UDPTunnel) {
-	sel.tunnels = append(sel.tunnels, tunnel)
+	ip := tunnel.LocalAddr().IP
+	if ip.IsLoopback() {
+		sel.loopPoll.Add(tunnel)
+	} else {
+		sel.otherPoll.Add(tunnel)
+	}
 }
 
 func (sel *TestSelector) Pick(remotes []string) (tunnels []*kcp.UDPTunnel) {
 	for i := 0; i < len(remotes); i++ {
-		idx := sel.idx % uint32(len(sel.tunnels))
-		atomic.AddUint32(&sel.idx, 1)
-		tunnels = append(tunnels, sel.tunnels[idx])
+		ipstr, _, err := net.SplitHostPort(remotes[i])
+		if err != nil {
+			panic("pick tunnel")
+		}
+		ip := net.ParseIP(ipstr)
+		if ip.IsLoopback() {
+			tunnels = append(tunnels, sel.loopPoll.Pick())
+		} else {
+			tunnels = append(tunnels, sel.otherPoll.Pick())
+		}
 	}
 	return tunnels
 }
@@ -232,7 +258,7 @@ func main() {
 		cli.StringFlag{
 			Name:  "localIp",
 			Value: "127.0.0.1",
-			Usage: "local tunnel ip",
+			Usage: "local tunnel ip list",
 		},
 		cli.StringFlag{
 			Name:  "localPortS",
@@ -328,13 +354,37 @@ func main() {
 			Value: 5,
 			Usage: "parallel xmit",
 		},
+		cli.StringFlag{
+			Name:  "telnetAddr",
+			Value: "127.0.0.1:23000",
+			Usage: "telnet addr",
+		},
+		cli.IntFlag{
+			Name:  "parallelCheckPeriods",
+			Value: 0,
+			Usage: "parallel check periods",
+		},
+		cli.Float64Flag{
+			Name:  "parallelStreamRate",
+			Value: 0,
+			Usage: "parallel stream rate",
+		},
+		cli.IntFlag{
+			Name:  "parallelDuration",
+			Value: 0,
+			Usage: "parallel duration",
+		},
 	}
 	myApp.Action = func(c *cli.Context) error {
 		listenAddr := c.String("listenAddr")
 		listenAddrD := c.String("listenAddrD")
+
 		targetAddr := c.String("targetAddr")
+		telnetAddr := c.String("telnetAddr")
 
 		localIp := c.String("localIp")
+		localIps := strings.Split(localIp, ",")
+
 		lPortS := c.String("localPortS")
 		localPortS, err := strconv.Atoi(lPortS)
 		checkError(err)
@@ -343,6 +393,8 @@ func main() {
 		checkError(err)
 
 		remoteIp := c.String("remoteIp")
+		remoteIps := strings.Split(remoteIp, ",")
+
 		rPortS := c.String("remotePortS")
 		remotePortS, err := strconv.Atoi(rPortS)
 		checkError(err)
@@ -359,6 +411,9 @@ func main() {
 		noResend := c.Int("noResend")
 		timeout := c.Int("timeout")
 		parallelXmit := c.Int("parallelXmit")
+		parallelCheckPeriods := c.Int("parallelCheckPeriods")
+		parallelStreamRate := c.Float64("parallelStreamRate")
+		parallelDuration := time.Second * time.Duration(c.Int("parallelDuration"))
 
 		transmitTunsS := c.String("transmitTuns")
 		transmitTuns, err := strconv.Atoi(transmitTunsS)
@@ -366,6 +421,7 @@ func main() {
 
 		fmt.Printf("Action listenAddr:%v\n", listenAddr)
 		fmt.Printf("Action listenAddrD:%v\n", listenAddrD)
+
 		fmt.Printf("Action targetAddr:%v\n", targetAddr)
 		fmt.Printf("Action localIp:%v\n", localIp)
 		fmt.Printf("Action localPortS:%v\n", localPortS)
@@ -383,6 +439,12 @@ func main() {
 		fmt.Printf("Action noResend:%v\n", noResend)
 		fmt.Printf("Action timeout:%v\n", timeout)
 		fmt.Printf("Action parallelXmit:%v\n", parallelXmit)
+		fmt.Printf("Action parallelCheckPeriods:%v\n", parallelCheckPeriods)
+		fmt.Printf("Action parallelStreamRate:%v\n", parallelStreamRate)
+		fmt.Printf("Action parallelDuration:%v\n", parallelDuration)
+
+		ln, err := net.Listen("tcp", telnetAddr)
+		checkError(err)
 
 		kcp.Logf = func(lvl kcp.LogLevel, f string, args ...interface{}) {
 			if int(lvl) >= logLevel {
@@ -390,37 +452,43 @@ func main() {
 			}
 		}
 
+		kcp.DefaultParallelXmit = parallelXmit
+
 		opt := &kcp.TransportOption{
-			DialTimeout:     time.Minute,
-			InputQueue:      inputQueueCount,
-			TunnelProcessor: tunnelProcessorCount,
+			DialTimeout:          time.Minute,
+			InputQueue:           inputQueueCount,
+			TunnelProcessor:      tunnelProcessorCount,
+			ParallelCheckPeriods: parallelCheckPeriods,
+			ParallelStreamRate:   parallelStreamRate,
+			ParallelDuration:     parallelDuration,
 		}
 
 		sel, err := NewTestSelector()
 		checkError(err)
 		transport, err := kcp.NewUDPTransport(sel, opt)
 		checkError(err)
-		for portS := localPortS; portS <= localPortE; portS++ {
-			tunnel, err := transport.NewTunnel(localIp + ":" + strconv.Itoa(portS))
-			checkError(err)
-			err = tunnel.SetReadBuffer(bufferSize)
-			checkError(err)
-			err = tunnel.SetWriteBuffer(bufferSize)
-			checkError(err)
+
+		tunnelsm := make(map[string][]*kcp.UDPTunnel)
+		for i := 0; i < len(localIps); i++ {
+			for portS := localPortS; portS <= localPortE; portS++ {
+				tunnel, err := transport.NewTunnel(localIps[i] + ":" + strconv.Itoa(portS))
+				checkError(err)
+				err = tunnel.SetReadBuffer(bufferSize)
+				checkError(err)
+				err = tunnel.SetWriteBuffer(bufferSize)
+				checkError(err)
+
+				tunnels, ok := tunnelsm[localIps[i]]
+				if !ok {
+					tunnels = make([]*kcp.UDPTunnel, 0)
+				}
+				tunnels = append(tunnels, tunnel)
+				tunnelsm[localIps[i]] = tunnels
+			}
 		}
 
 		if transmitTuns > (remotePortE - remotePortS + 1) {
 			checkError(errors.New("invliad transmitTuns"))
-		}
-
-		locals := []string{}
-		for portS := localPortS; portS <= localPortE; portS++ {
-			locals = append(locals, localIp+":"+strconv.Itoa(portS))
-		}
-
-		remotes := []string{}
-		for portS := remotePortS; portS <= remotePortE; portS++ {
-			remotes = append(remotes, remoteIp+":"+strconv.Itoa(portS))
 		}
 
 		addr, err := net.ResolveTCPAddr("tcp", listenAddr)
@@ -435,6 +503,51 @@ func main() {
 
 		go func() {
 			for {
+				conn, err := ln.Accept()
+				if err != nil {
+					log.Println("Accept failed", err)
+					continue
+				}
+				defer conn.Close()
+				scanner := bufio.NewScanner(conn)
+				for scanner.Scan() {
+					sp := strings.Split(scanner.Text(), " ")
+					log.Println("scanner", sp)
+					switch sp[0] {
+					case "simulate":
+						if len(sp) < 2 {
+							log.Println("simulate missing param")
+							break
+						}
+						tunnels, ok := tunnelsm[sp[1]]
+						if !ok {
+							log.Println("simulate invalid addr")
+							break
+						}
+						log.Println("simulate", sp)
+						var err error
+						var loss float64 = 100
+						delayMin := 0
+						delayMax := 0
+						if len(sp) >= 5 {
+							loss, err = strconv.ParseFloat(sp[2], 64)
+							checkError(err)
+							delayMin, err = strconv.Atoi(sp[3])
+							checkError(err)
+							delayMax, err = strconv.Atoi(sp[4])
+							checkError(err)
+						}
+						for i := 0; i < len(tunnels); i++ {
+							tunnels[i].Simulate(loss, delayMin, delayMax)
+						}
+					}
+				}
+			}
+		}()
+
+		go func() {
+			for {
+				return
 				time.Sleep(time.Second * 10)
 				headers := kcp.DefaultSnmp.Header()
 				values := kcp.DefaultSnmp.ToSlice()
@@ -472,15 +585,17 @@ func main() {
 
 			go func() {
 				tunLocals := []string{}
-				for i := 0; i < transmitTuns; i++ {
-					tunLocals = append(tunLocals, locals[localIdx%len(locals)])
-					localIdx++
+				for i := range localIps {
+					port := localIdx%(localPortE-localPortS+1) + localPortS
+					tunLocals = append(tunLocals, localIps[i]+":"+strconv.Itoa(port))
 				}
 				tunRemotes := []string{}
-				for i := 0; i < transmitTuns; i++ {
-					tunRemotes = append(tunRemotes, remotes[remoteIdx%len(remotes)])
-					remoteIdx++
+				for i := range remoteIps {
+					port := remoteIdx%(remotePortE-remotePortS+1) + remotePortS
+					tunRemotes = append(tunRemotes, remoteIps[i]+":"+strconv.Itoa(port))
 				}
+				localIdx++
+				remoteIdx++
 				start := time.Now()
 				stream, err := transport.OpenTimeout(tunLocals, tunRemotes, time.Duration(timeout)*time.Millisecond)
 				if err != nil {

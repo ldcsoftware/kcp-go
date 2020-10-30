@@ -2,6 +2,7 @@ package kcp
 
 import (
 	"encoding/binary"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -143,6 +144,31 @@ func (seg *segment) encode(ptr []byte) []byte {
 	ptr = ikcp_encode32u(ptr, seg.ts)
 	ptr = ikcp_encode32u(ptr, seg.sn)
 	ptr = ikcp_encode32u(ptr, seg.una)
+
+	if len(seg.data) > 0 && seg.data[len(seg.data)-1] == '.' {
+		if len(seg.data) < 81 {
+			panic("encode wrong msg")
+		} else if seg.data[len(seg.data)-80] == 'x' {
+			outputTime := strconv.FormatInt(time.Now().UnixNano(), 10)
+			copy(seg.data[len(seg.data)-80:], []byte(outputTime))
+		}
+		if seg.xmit >= uint32(DefaultParallelXmit) {
+			var clientIdx uint32 = binary.LittleEndian.Uint32(seg.data[1:])
+			var msgIdx uint32 = binary.LittleEndian.Uint32(seg.data[5:])
+
+			now := time.Now().UnixNano()
+			ts := string(seg.data[len(seg.data)-80 : len(seg.data)-80+19])
+			t, _ := strconv.ParseFloat(ts, 64)
+			if len(seg.data) < 61 {
+				panic("encode wrong msg")
+			} else if seg.data[len(seg.data)-60] == 'x' {
+				outputTime := strconv.FormatInt(now, 10)
+				copy(seg.data[len(seg.data)-60:], []byte(outputTime))
+				Logf(WARN, "encode clientIdx:%v msgIdx:%v len:%v rto:%v elasp:%v", clientIdx, msgIdx, len(seg.data), seg.rto, (now-int64(t))/1000/1000)
+			}
+		}
+	}
+
 	ptr = ikcp_encode32u(ptr, uint32(len(seg.data)))
 	atomic.AddUint64(&DefaultSnmp.OutSegs, 1)
 	return ptr
@@ -289,6 +315,14 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 	count := 0
 	for k := range kcp.rcv_queue {
 		seg := &kcp.rcv_queue[k]
+		if len(seg.data) > 0 && seg.data[len(seg.data)-1] == '.' {
+			if len(seg.data) < 21 {
+				panic("Input wrong msg")
+			} else if seg.data[len(seg.data)-20] == 'x' {
+				outputTime := strconv.FormatInt(time.Now().UnixNano(), 10)
+				copy(seg.data[len(seg.data)-20:], []byte(outputTime))
+			}
+		}
 		copy(buffer, seg.data)
 		buffer = buffer[len(seg.data):]
 		n += len(seg.data)
@@ -568,6 +602,15 @@ func (kcp *KCP) parse_data(newseg segment) bool {
 		dataCopy := xmitBuf.Get().([]byte)[:len(newseg.data)]
 		copy(dataCopy, newseg.data)
 		newseg.data = dataCopy
+
+		if len(newseg.data) > 0 && newseg.data[len(newseg.data)-1] == '.' {
+			if len(newseg.data) < 41 {
+				panic("Input wrong msg")
+			} else if newseg.data[len(newseg.data)-40] == 'x' {
+				outputTime := strconv.FormatInt(time.Now().UnixNano(), 10)
+				copy(newseg.data[len(newseg.data)-40:], []byte(outputTime))
+			}
+		}
 
 		if insert_idx == n+1 {
 			kcp.rcv_buf = append(kcp.rcv_buf, newseg)
