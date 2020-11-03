@@ -757,17 +757,25 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 	seg.wnd = kcp.wnd_unused()
 	seg.una = kcp.rcv_nxt
 
-	buffer := kcp.buffer
-	ptr := buffer[kcp.reserved:] // keep n bytes untouched
+	var buffer []byte
+	var ptr []byte
 
 	var xmitMax uint32
 
+	makeBuffer := func() {
+		buffer = xmitBuf.Get().([]byte)[:kcp.mtu]
+		ptr = buffer[kcp.reserved:] // keep n bytes untouched
+	}
+
 	// makeSpace makes room for writing
 	makeSpace := func(space int) {
+		if cap(buffer) == 0 {
+			makeBuffer()
+		}
 		size := len(buffer) - len(ptr)
 		if size+space > int(kcp.mtu) {
 			kcp.output(buffer, size, xmitMax)
-			ptr = buffer[kcp.reserved:]
+			makeBuffer()
 			xmitMax = 0
 		}
 	}
