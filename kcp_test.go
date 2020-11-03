@@ -7,12 +7,15 @@ import (
 	"io"
 	"log"
 	"math/rand"
+	"net"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"golang.org/x/net/ipv4"
 )
 
 var logs [5]*log.Logger
@@ -921,6 +924,42 @@ func BenchmarkFlush(b *testing.B) {
 		mu.Lock()
 		kcp.flush(false)
 		mu.Unlock()
+	}
+}
+
+func BenchmarkMsgPushAndPop(b *testing.B) {
+	tunnel, _ := NewUDPTunnel("127.0.0.1:0", nil)
+	tunnel.Close()
+
+	streamCount := 100
+
+	msgss := make([][]ipv4.Message, streamCount)
+	for i := 0; i < streamCount; i++ {
+		msgCount := rand.Intn(5) + 1
+		addr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:"+strconv.Itoa(rand.Intn(10)+1))
+		msgs := make([]ipv4.Message, 0)
+		for j := 0; j < msgCount; j++ {
+			msgs = append(msgs, ipv4.Message{Addr: addr})
+		}
+		msgss[i] = msgs
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	var msgssR [][]ipv4.Message
+	for n := 0; n < b.N; n++ {
+		wg := sync.WaitGroup{}
+		wg.Add(streamCount)
+		for i := 0; i < streamCount; i++ {
+			go func(idx int) {
+				defer wg.Done()
+				tunnel.pushMsgs(msgss[idx])
+			}(i)
+		}
+		wg.Wait()
+		tunnel.popMsgss(&msgssR)
+		msgssR = msgssR[:0]
 	}
 }
 
