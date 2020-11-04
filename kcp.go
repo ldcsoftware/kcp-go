@@ -2,6 +2,7 @@ package kcp
 
 import (
 	"encoding/binary"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -909,7 +910,9 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 		} else if _itimediff(current, segment.resendts) >= 0 { // RTO
 			needsend = true
 			if kcp.nodelay == 0 {
-				segment.rto += kcp.rx_rto
+				segment.rto += uint32(math.Max(float64(segment.rto), float64(kcp.rx_rto)))
+			} else if kcp.nodelay == 1 {
+				segment.rto += segment.rto / 2
 			} else {
 				segment.rto += kcp.rx_rto / 2
 			}
