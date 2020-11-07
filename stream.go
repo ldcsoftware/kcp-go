@@ -478,7 +478,9 @@ func (s *UDPStream) Close() error {
 	}
 
 	s.WriteFlag(RST, nil)
-	s.flush()
+	if s.writeDelay {
+		s.flush()
+	}
 	close(s.chClose)
 
 	s.mu.Lock()
