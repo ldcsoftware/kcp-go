@@ -526,7 +526,9 @@ func (s *UDPStream) dial(locals []string, timeout time.Duration) error {
 	s.parallelExpire = time.Now().Add(timeout)
 
 	s.WriteFlag(SYN, []byte(strings.Join(locals, " ")))
-	s.flush()
+	if s.writeDelay {
+		s.flush()
+	}
 
 	dialTimer := time.NewTimer(timeout)
 	defer dialTimer.Stop()
@@ -716,6 +718,8 @@ func (s *UDPStream) parallelTun(xmitMax uint32) (parallel int) {
 }
 
 func (s *UDPStream) output(buf []byte, xmitMax uint32) {
+	Logf(DEBUG, "UDPStream::output uuid:%v accepted:%v len:%v xmitMax:%v", s.uuid, s.accepted, len(buf), xmitMax)
+
 	appendCount := s.parallelTun(xmitMax)
 	for i := len(s.msgss); i < appendCount; i++ {
 		s.msgss = append(s.msgss, make([]ipv4.Message, 0))
@@ -738,6 +742,8 @@ func (s *UDPStream) output(buf []byte, xmitMax uint32) {
 }
 
 func (s *UDPStream) input(data []byte) {
+	Logf(DEBUG, "UDPStream::input uuid:%v accepted:%v len:%v", s.uuid, s.accepted, len(data))
+
 	var kcpInErrors uint64
 
 	s.mu.Lock()
