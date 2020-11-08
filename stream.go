@@ -495,7 +495,6 @@ func (s *UDPStream) Close() error {
 	if s.hp != nil {
 		s.hp.dec()
 	}
-
 	return nil
 }
 
