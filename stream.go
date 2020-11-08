@@ -482,11 +482,12 @@ func (s *UDPStream) Close() error {
 
 	s.WriteFlag(RST, nil)
 	close(s.chClose)
+	s.hrtTicker.Stop()
+	s.cleanTimer.Reset(CleanTimeout)
 
 	s.mu.Lock()
-	s.hrtTicker.Stop()
+	defer s.mu.Unlock()
 	if s.state != StateEstablish {
-		s.mu.Unlock()
 		return nil
 	}
 	s.state = StateClosed
@@ -494,9 +495,7 @@ func (s *UDPStream) Close() error {
 	if s.hp != nil {
 		s.hp.dec()
 	}
-	s.mu.Unlock()
 
-	s.cleanTimer.Reset(CleanTimeout)
 	return nil
 }
 
