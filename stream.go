@@ -484,16 +484,16 @@ func (s *UDPStream) Close() error {
 	close(s.chClose)
 
 	s.mu.Lock()
+	s.hrtTicker.Stop()
+	s.kcp.ReleaseTX()
 	if s.state != StateEstablish {
 		s.mu.Unlock()
 		return nil
 	}
 	s.state = StateClosed
-	s.hrtTicker.Stop()
 	if s.hp != nil {
 		s.hp.dec()
 	}
-	s.kcp.ReleaseTX()
 	s.mu.Unlock()
 
 	atomic.AddUint64(&DefaultSnmp.CurrEstab, ^uint64(0))
