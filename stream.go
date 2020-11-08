@@ -527,9 +527,6 @@ func (s *UDPStream) dial(locals []string, timeout time.Duration) error {
 	s.parallelExpire = time.Now().Add(timeout)
 
 	s.WriteFlag(SYN, []byte(strings.Join(locals, " ")))
-	if s.writeDelay {
-		s.flush()
-	}
 
 	dialTimer := time.NewTimer(timeout)
 	defer dialTimer.Stop()
