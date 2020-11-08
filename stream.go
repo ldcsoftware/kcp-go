@@ -70,6 +70,7 @@ type (
 
 		// settings
 		hrtTicker  *time.Ticker // heart beat ticker
+		cleanTimer *time.Timer  // clean timer
 		rd         time.Time    // read deadline
 		wd         time.Time    // write deadline
 		headerSize int          // the header size additional to a KCP frame
@@ -146,6 +147,7 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, pc *paralle
 	stream.locals = locals
 	stream.remotes = remoteAddrs
 	stream.hrtTicker = time.NewTicker(HeartbeatInterval)
+	stream.cleanTimer = time.NewTimer(CleanTimeout)
 	stream.parallelXmit = uint32(DefaultParallelXmit)
 	stream.parallelTime = DefaultParallelTime
 	stream.pc = pc
@@ -157,6 +159,7 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, pc *paralle
 	})
 	stream.kcp.ReserveBytes(stream.headerSize)
 
+	stream.cleanTimer.Stop()
 	go stream.update()
 
 	Logf(INFO, "NewUDPStream uuid:%v accepted:%v locals:%v remotes:%v", uuid, accepted, locals, remotes)
@@ -478,14 +481,10 @@ func (s *UDPStream) Close() error {
 	}
 
 	s.WriteFlag(RST, nil)
-	if s.writeDelay {
-		s.flush()
-	}
 	close(s.chClose)
 
 	s.mu.Lock()
 	s.hrtTicker.Stop()
-	s.kcp.ReleaseTX()
 	if s.state != StateEstablish {
 		s.mu.Unlock()
 		return nil
@@ -496,8 +495,8 @@ func (s *UDPStream) Close() error {
 	}
 	s.mu.Unlock()
 
+	s.cleanTimer.Reset(CleanTimeout)
 	atomic.AddUint64(&DefaultSnmp.CurrEstab, ^uint64(0))
-	s.cleancb(s.uuid)
 	return nil
 }
 
@@ -635,7 +634,12 @@ func (s *UDPStream) update() {
 
 	for {
 		select {
-		case <-s.chClose:
+		case <-s.cleanTimer.C:
+			Logf(INFO, "UDPStream::clean uuid:%v accepted:%v", s.uuid, s.accepted)
+			s.mu.Lock()
+			s.kcp.ReleaseTX()
+			s.mu.Unlock()
+			s.cleancb(s.uuid)
 			return
 		case <-s.hrtTicker.C:
 			Logf(DEBUG, "UDPStream::heartbeat uuid:%v accepted:%v", s.uuid, s.accepted)
