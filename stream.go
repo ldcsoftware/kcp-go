@@ -490,13 +490,13 @@ func (s *UDPStream) Close() error {
 		return nil
 	}
 	s.state = StateClosed
+	atomic.AddUint64(&DefaultSnmp.CurrEstab, ^uint64(0))
 	if s.hp != nil {
 		s.hp.dec()
 	}
 	s.mu.Unlock()
 
 	s.cleanTimer.Reset(CleanTimeout)
-	atomic.AddUint64(&DefaultSnmp.CurrEstab, ^uint64(0))
 	return nil
 }
 
