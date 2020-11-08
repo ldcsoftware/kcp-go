@@ -721,7 +721,7 @@ func (s *UDPStream) parallelTun(xmitMax uint32) (parallel int) {
 }
 
 func (s *UDPStream) output(buf []byte, xmitMax uint32) {
-	Logf(DEBUG, "UDPStream::output uuid:%v accepted:%v len:%v xmitMax:%v", s.uuid, s.accepted, len(buf), xmitMax)
+	// Logf(DEBUG, "UDPStream::output uuid:%v accepted:%v len:%v xmitMax:%v", s.uuid, s.accepted, len(buf), xmitMax)
 
 	appendCount := s.parallelTun(xmitMax)
 	for i := len(s.msgss); i < appendCount; i++ {
@@ -745,7 +745,7 @@ func (s *UDPStream) output(buf []byte, xmitMax uint32) {
 }
 
 func (s *UDPStream) input(data []byte) {
-	Logf(DEBUG, "UDPStream::input uuid:%v accepted:%v len:%v", s.uuid, s.accepted, len(data))
+	// Logf(DEBUG, "UDPStream::input uuid:%v accepted:%v len:%v", s.uuid, s.accepted, len(data))
 
 	var kcpInErrors uint64
 
