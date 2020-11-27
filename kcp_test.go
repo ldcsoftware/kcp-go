@@ -851,10 +851,10 @@ func randString(n int) string {
 	return string(b)
 }
 
-func TestTcpFileTransfer(t *testing.T) {
+func TestTCPFileTransfer(t *testing.T) {
 	lFile := randString(1024 * 512)
 	lReader := strings.NewReader(lFile)
-	rFile := randString(1024 * 1024 * 1000)
+	rFile := randString(1024 * 1024 * 100)
 	rReader := strings.NewReader(rFile)
 
 	lh := md5.New()
@@ -915,7 +915,7 @@ func TestTcpFileTransfer(t *testing.T) {
 	<-finish
 }
 
-func TestFileTransfer(t *testing.T) {
+func TestUDPFileTransfer(t *testing.T) {
 	lFile := randString(1024 * 512)
 	lReader := strings.NewReader(lFile)
 	rFile := randString(1024 * 1024 * 100)
