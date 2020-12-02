@@ -79,7 +79,7 @@ func toUdpStreamBridge(dst *kcp.UDPStream, src *net.TCPConn) (wcount int, wcost 
 	for {
 		start := 0
 		n, err := src.Read(*buf)
-		if err != nil {
+		if n == 0 && err != nil {
 			kcp.Logf(kcp.ERROR, "toUdpStreamBridge reading err:%v n:%v", err, n)
 			return wcount, wcost, err
 		}
@@ -103,7 +103,7 @@ func toTcpStreamBridge(dst *net.TCPConn, src *kcp.UDPStream) (wcount int, wcost 
 
 	for {
 		n, err := src.Read(*buf)
-		if err != nil {
+		if n == 0 && err != nil {
 			kcp.Logf(kcp.ERROR, "toTcpStreamBridge reading err:%v n:%v", err, n)
 			return wcount, wcost, err
 		}
@@ -201,7 +201,7 @@ func handleClientEcho(s *kcp.UDPStream) {
 
 	for {
 		n, err := s.Read(*buf)
-		if err != nil {
+		if n == 0 && err != nil {
 			kcp.Logf(kcp.ERROR, "toTcpStreamBridge reading err:%v n:%v", err, n)
 			break
 		}
