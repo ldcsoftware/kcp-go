@@ -222,7 +222,7 @@ func server(t *testing.T, nodelay, interval, resend, nc int) {
 	buf := make([]byte, 65536)
 	for {
 		n, err := stream.Read(buf)
-		if err != nil {
+		if n == 0 && err != nil {
 			return
 		}
 		stream.Write(buf[:n])
@@ -264,7 +264,7 @@ func handleEchoClient(stream *UDPStream) {
 	buf := make([]byte, 65536)
 	for {
 		n, err := stream.Read(buf)
-		if err != nil {
+		if n == 0 && err != nil {
 			return
 		}
 		stream.Write(buf[:n])
@@ -320,7 +320,7 @@ func echoTester(stream *UDPStream, msglen, msgcount int) error {
 		nrecv := 0
 		for {
 			n, err := stream.Read(buf)
-			if err != nil {
+			if n == 0 && err != nil {
 				return err
 			}
 			nrecv += n
@@ -467,7 +467,7 @@ func TestLanBroken(t *testing.T) {
 	for i := 0; i < N; i++ {
 		msg := fmt.Sprintf("hello%v", i)
 		stream.Write([]byte(msg))
-		if n, err := stream.Read(buf); err == nil {
+		if n, err := stream.Read(buf); n != 0 {
 			if string(buf[:n]) != msg {
 				t.Fatal("TestSendRecv msg not equal", err)
 			}
@@ -512,7 +512,7 @@ func TestSendRecv(t *testing.T) {
 	for i := 0; i < N; i++ {
 		msg := fmt.Sprintf("hello%v", i)
 		stream.Write([]byte(msg))
-		if n, err := stream.Read(buf); err == nil {
+		if n, err := stream.Read(buf); n != 0 {
 			if string(buf[:n]) != msg {
 				t.Fatal("TestSendRecv msg not equal", err)
 			}
@@ -532,7 +532,7 @@ func tinyRecvServer(t *testing.T) {
 	buf := make([]byte, 2)
 	for {
 		n, err := stream.Read(buf)
-		if err != nil {
+		if n == 0 && err != nil {
 			return
 		}
 		stream.Write(buf[:n])
@@ -676,8 +676,8 @@ func TestClose(t *testing.T) {
 
 	stream.CloseWrite()
 	n, err = stream.Read(buf[:5])
-	if n == 0 || err != nil {
-		t.Fatalf("Read after CloseWrite misbehavior. err:%v", err)
+	if n == 0 {
+		t.Fatalf("Read after CloseWrite misbehavior. n:%v err:%v", n, err)
 	}
 
 	n, err = stream.Write(buf)
