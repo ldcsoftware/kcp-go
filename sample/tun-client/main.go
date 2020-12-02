@@ -297,7 +297,7 @@ func main() {
 		},
 		cli.StringFlag{
 			Name:  "cmdAddr",
-			Value: "127.0.0.1:23000",
+			Value: "0.0.0.0:23000",
 			Usage: "cmd address",
 		},
 		cli.IntFlag{
@@ -515,7 +515,7 @@ func main() {
 				kcp.Logf(kcp.ERROR, "OpenTimeout failed. err:%v \n", err)
 				return nil, err
 			}
-			stream.SetWindowSize(wndSize, wndSize)
+			stream.SetWindowSize(wndSize, wndSize*2)
 			stream.SetNoDelay(kcp.FastStreamOption.Nodelay, interval, kcp.FastStreamOption.Resend, kcp.FastStreamOption.Nc)
 			stream.SetParallelXmit(uint32(parallelXmit))
 
@@ -816,7 +816,7 @@ func (fs *fileToStream) Read(b []byte) (n int, err error) {
 		}
 		n += 4
 
-		log.Printf("fileToStream size:%v md5:%v", nw.n, fs.md5)
+		log.Printf("fileToStream size:%v md5:%v n:%v", nw.n, fs.md5, n)
 		return n, nil
 	}
 	n, err = fs.src.Read(b)
@@ -855,16 +855,22 @@ func (sf *streamToFile) Write(b []byte) (n int, err error) {
 		sf.recvMd5 = fi.Md5
 		sf.recvSize = fi.Size
 		sf.hmd5 = md5.New()
+		n = filen + 4
 
-		log.Printf("streamToFile recvSize:%v recvMd5:%v \n", fi.Size, fi.Md5)
-		return filen + 4, nil
+		log.Printf("streamToFile recvSize:%v recvMd5:%v n:%v left:%v \n", fi.Size, fi.Md5, n, len(b)-n)
+		if n >= len(b) {
+			return n, nil
+		} else {
+			b = b[n:]
+		}
 	}
 	if len(sf.md5) != 0 {
 		log.Fatalf("file recv wrong, md5 alreaddy calc. n:%v \n", len(b))
 	}
 
 	sf.size += len(b)
-	n, err = sf.hmd5.Write(b)
+	nn, err := sf.hmd5.Write(b)
+	n += nn
 	if sf.size >= sf.recvSize {
 		sf.md5 = base64.StdEncoding.EncodeToString(sf.hmd5.Sum(nil))
 	}
