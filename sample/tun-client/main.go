@@ -127,7 +127,7 @@ func iobridge(dst io.Writer, src io.Reader) (wcount int, wcost float64, err erro
 
 	for {
 		n, err := src.Read(*buf)
-		if err != nil {
+		if n == 0 && err != nil {
 			kcp.Logf(kcp.ERROR, "iobridge reading err:%v n:%v", err, n)
 			return wcount, wcost, err
 		}

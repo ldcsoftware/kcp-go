@@ -224,7 +224,7 @@ func iobridge(dst io.Writer, src io.Reader) {
 	buf := bufPool.Get().(*[]byte)
 	for {
 		n, err := src.Read(*buf)
-		if err != nil {
+		if n == 0 && err != nil {
 			log.Printf("iobridge reading err:%v n:%v \n", err, n)
 			break
 		}

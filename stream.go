@@ -333,6 +333,9 @@ func (s *UDPStream) Read(b []byte) (n int, err error) {
 				n += copyn
 				atomic.AddUint64(&DefaultSnmp.BytesReceived, uint64(copyn))
 				if n == len(b) {
+					if s.kcp.probe_ask_tell() {
+						s.notifyFlushEvent(true)
+					}
 					s.mu.Unlock()
 					return n, nil
 				}
@@ -355,13 +358,16 @@ func (s *UDPStream) Read(b []byte) (n int, err error) {
 				}
 				atomic.AddUint64(&DefaultSnmp.BytesReceived, uint64(copyn))
 				if n == len(b) || err != nil {
-					if err == io.EOF {
-						err = nil
+					if s.kcp.probe_ask_tell() {
+						s.notifyFlushEvent(true)
 					}
 					s.mu.Unlock()
 					return n, err
 				}
 			} else if n > 0 {
+				if s.kcp.probe_ask_tell() {
+					s.notifyFlushEvent(true)
+				}
 				s.mu.Unlock()
 				return n, nil
 			} else {
@@ -803,11 +809,11 @@ func (s *UDPStream) input(data []byte) {
 	}
 
 	rmt_wnd := s.kcp.rmt_wnd
-	// acklen := len(s.kcp.acklist)
-	// immediately := (s.ackNoDelay && acklen > 0) || uint32(acklen) > s.ackNoDelayCount || (float32(acklen)/float32(s.kcp.rcv_wnd) > s.ackNoDelayRatio)
+	acklen := len(s.kcp.acklist)
+	immediately := (s.ackNoDelay && acklen > 0) || uint32(acklen) > s.ackNoDelayCount || (float32(acklen)/float32(s.kcp.rcv_wnd) > s.ackNoDelayRatio)
 	s.mu.Unlock()
 
-	s.notifyFlushEvent(false)
+	s.notifyFlushEvent(immediately)
 
 	Logf(DEBUG, "UDPStream::input uuid:%v accepted:%v len:%v rmt_wnd:%v", s.uuid, s.accepted, len(data), rmt_wnd)
 
