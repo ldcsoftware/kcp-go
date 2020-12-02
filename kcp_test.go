@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	gouuid "github.com/satori/go.uuid"
 	"golang.org/x/net/ipv4"
 )
 
@@ -581,6 +582,79 @@ func TestTinyBufferReceiver(t *testing.T) {
 	}
 }
 
+func randomSendServer(t *testing.T, size int, sizeMax int) {
+	stream, err := serverTransport.Accept()
+	if err != nil {
+		Logf(ERROR, "echoServer accept err:%v", err)
+	}
+	defer stream.Close()
+
+	buf := make([]byte, size)
+	for i := 0; i < len(buf); i++ {
+		buf[i] = byte((i % 256))
+	}
+
+	sendSizeMax := sizeMax
+	totalSendSize := 0
+
+	for {
+		sendSize := rand.Intn(sendSizeMax)
+		if totalSendSize+sendSize > size {
+			sendSize = size - totalSendSize
+		}
+		stream.Write(buf[totalSendSize : totalSendSize+sendSize])
+		totalSendSize += sendSize
+		if totalSendSize >= size {
+			break
+		}
+	}
+}
+
+func TestRandomBufferReceiver(t *testing.T) {
+	size := 1024 * 1024
+	sizeMax := 1024 * 128
+	go randomSendServer(t, size, sizeMax)
+
+	stream, err := clientTransport.Open(clientSel.PickAddrs(ipsCount))
+	if err != nil {
+		t.Fatalf("client open stream failed. err:%v", err)
+	}
+	defer stream.Close()
+
+	rcevSizeMax := sizeMax
+	totalRecvSize := 0
+	buf := make([]byte, size)
+	maxN := 0
+	for {
+		recvSize := rand.Intn(rcevSizeMax)
+		if totalRecvSize+recvSize > size {
+			recvSize = size - totalRecvSize
+		}
+		n, err := stream.Read(buf[totalRecvSize : totalRecvSize+recvSize])
+		recvSize = n
+		if n > maxN {
+			maxN = n
+		}
+		if err != nil {
+			t.Fatalf("read size wrong or err is not nil. n:%v recvSize:%v err:%v", n, recvSize, err)
+		}
+		for i := totalRecvSize; i < totalRecvSize+recvSize; i++ {
+			if buf[i] != byte(i%256) {
+				t.Fatalf("random buf read faild. i:%v value:%v target:%v", i, buf[i], byte(i%256))
+			}
+		}
+		totalRecvSize += recvSize
+		if totalRecvSize >= size {
+			break
+		}
+	}
+	n, err := stream.Read(buf)
+	if n != 0 {
+		t.Fatalf("read size wrong or err is not eof. n:%v err:%v", n, err)
+	}
+	log.Printf("maxN:%v", maxN)
+}
+
 func TestClose(t *testing.T) {
 	go echoServer()
 
@@ -916,9 +990,9 @@ func TestTCPFileTransfer(t *testing.T) {
 }
 
 func TestUDPFileTransfer(t *testing.T) {
-	lFile := randString(1024 * 512)
+	lFile := randString(1024)
 	lReader := strings.NewReader(lFile)
-	rFile := randString(1024 * 1024 * 100)
+	rFile := randString(1024 * 1024 * 16)
 	rReader := strings.NewReader(rFile)
 
 	lh := md5.New()
@@ -942,7 +1016,8 @@ func TestUDPFileTransfer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("FileTransferClient open stream %v", err)
 		}
-		clientStream.SetWindowSize(256, 256)
+		clientStream.SetNoDelay(1, 20, 2, 1)
+		clientStream.SetWindowSize(32, 32)
 	}()
 
 	go func() {
@@ -950,7 +1025,8 @@ func TestUDPFileTransfer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("FileTransferServer Accept stream %v", err)
 		}
-		serverStream.SetWindowSize(256, 256)
+		serverStream.SetNoDelay(1, 20, 2, 1)
+		serverStream.SetWindowSize(32, 32)
 	}()
 
 	for {
@@ -976,7 +1052,7 @@ func TestUDPFileTransfer(t *testing.T) {
 }
 
 func TestAckXmit(t *testing.T) {
-	kcp := NewKCP(1, func(buf []byte, size int, xmitMax uint32) {})
+	kcp := NewKCP(1, gouuid.UUID{}, func(buf []byte, size int, xmitMax uint32) {})
 	for i := 0; i < IKCP_WND_RCV+2; i++ {
 		kcp.ack_push(uint32(i), 0)
 	}
@@ -1020,7 +1096,7 @@ func TestAckXmit(t *testing.T) {
 }
 
 func BenchmarkFlush(b *testing.B) {
-	kcp := NewKCP(1, func(buf []byte, size int, xmitMax uint32) {})
+	kcp := NewKCP(1, gouuid.UUID{}, func(buf []byte, size int, xmitMax uint32) {})
 	kcp.snd_buf = make([]segment, 1024)
 	for k := range kcp.snd_buf {
 		kcp.snd_buf[k].xmit = 1

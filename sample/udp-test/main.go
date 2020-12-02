@@ -40,7 +40,39 @@ func input_callback(tunnel *kcp.UDPTunnel, data []byte, addr net.Addr) {
 	fmt.Printf("recv target uuid:%v remote:%v \n", uuid, addr)
 }
 
+type ss struct {
+}
+
+func (s *ss) test1() {
+	fmt.Println("ss test1")
+	s.test2()
+}
+
+func (s *ss) test2() {
+	fmt.Println("ss test2")
+}
+
+type sss struct {
+	*ss
+}
+
+func (s *sss) test1() {
+	fmt.Println("sss test1")
+	s.ss.test1()
+}
+
+func (s *sss) test2() {
+	fmt.Println("sss test2")
+}
+
 func main() {
+	buf := make([]byte, 500)
+	for i := 0; i < len(buf); i++ {
+		buf[i] = byte((i % 256))
+	}
+	fmt.Println(buf)
+	return
+
 	flag.Parse()
 
 	Debug := log.New(os.Stdout,
