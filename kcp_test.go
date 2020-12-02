@@ -928,7 +928,7 @@ func randString(n int) string {
 func TestTCPFileTransfer(t *testing.T) {
 	lFile := randString(1024 * 512)
 	lReader := strings.NewReader(lFile)
-	rFile := randString(1024 * 1024 * 100)
+	rFile := randString(1024 * 1024 * 16)
 	rReader := strings.NewReader(rFile)
 
 	lh := md5.New()
@@ -1017,7 +1017,7 @@ func TestUDPFileTransfer(t *testing.T) {
 			t.Fatalf("FileTransferClient open stream %v", err)
 		}
 		clientStream.SetNoDelay(1, 20, 2, 1)
-		clientStream.SetWindowSize(32, 32)
+		clientStream.SetWindowSize(32, 64)
 	}()
 
 	go func() {
@@ -1026,7 +1026,7 @@ func TestUDPFileTransfer(t *testing.T) {
 			t.Fatalf("FileTransferServer Accept stream %v", err)
 		}
 		serverStream.SetNoDelay(1, 20, 2, 1)
-		serverStream.SetWindowSize(32, 32)
+		serverStream.SetWindowSize(32, 64)
 	}()
 
 	for {

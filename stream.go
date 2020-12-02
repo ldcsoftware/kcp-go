@@ -810,7 +810,7 @@ func (s *UDPStream) input(data []byte) {
 
 	rmt_wnd := s.kcp.rmt_wnd
 	acklen := len(s.kcp.acklist)
-	immediately := (s.ackNoDelay && acklen > 0) || uint32(acklen) > s.ackNoDelayCount || (float32(acklen)/float32(s.kcp.rcv_wnd) > s.ackNoDelayRatio)
+	immediately := (s.ackNoDelay && acklen > 0) || uint32(acklen) > s.ackNoDelayCount || (float32(acklen)/float32(s.kcp.snd_wnd) > s.ackNoDelayRatio)
 	s.mu.Unlock()
 
 	s.notifyFlushEvent(immediately)
