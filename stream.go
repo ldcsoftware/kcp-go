@@ -157,7 +157,7 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, pc *paralle
 	stream.ackNoDelayRatio = DefaultAckNoDelayRatio
 	stream.ackNoDelayCount = DefaultAckNoDelayCount
 
-	stream.kcp = NewKCP(1, uuid, func(buf []byte, size int, xmitMax uint32) {
+	stream.kcp = NewKCP(1, func(buf []byte, size int, xmitMax uint32) {
 		if size >= IKCP_OVERHEAD+stream.headerSize {
 			stream.output(buf[:size], xmitMax)
 		}
@@ -815,7 +815,7 @@ func (s *UDPStream) input(data []byte) {
 
 	s.notifyFlushEvent(immediately)
 
-	Logf(DEBUG, "UDPStream::input uuid:%v accepted:%v len:%v rmt_wnd:%v", s.uuid, s.accepted, len(data), rmt_wnd)
+	// Logf(DEBUG, "UDPStream::input uuid:%v accepted:%v len:%v rmt_wnd:%v", s.uuid, s.accepted, len(data), rmt_wnd)
 
 	atomic.AddUint64(&DefaultSnmp.InPkts, 1)
 	atomic.AddUint64(&DefaultSnmp.InBytes, uint64(len(data)))

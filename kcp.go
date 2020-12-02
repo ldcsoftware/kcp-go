@@ -6,8 +6,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	gouuid "github.com/satori/go.uuid"
 )
 
 const (
@@ -178,8 +176,6 @@ type KCP struct {
 	buffer   []byte
 	reserved int
 	output   output_callback
-
-	uuid gouuid.UUID
 }
 
 type ackItem struct {
@@ -197,7 +193,7 @@ type ackXmitItem struct {
 // 'conv' must be equal in the connection peers, or else data will be silently rejected.
 //
 // 'output' function will be called whenever these is data to be sent on wire.
-func NewKCP(conv uint32, uuid gouuid.UUID, output output_callback) *KCP {
+func NewKCP(conv uint32, output output_callback) *KCP {
 	kcp := new(KCP)
 	kcp.conv = conv
 	kcp.snd_wnd = IKCP_WND_SND
@@ -213,7 +209,6 @@ func NewKCP(conv uint32, uuid gouuid.UUID, output output_callback) *KCP {
 	kcp.ssthresh = IKCP_THRESH_INIT
 	kcp.dead_link = IKCP_DEADLINK
 	kcp.output = output
-	kcp.uuid = uuid
 	return kcp
 }
 
@@ -330,8 +325,6 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 		// ready to send back IKCP_CMD_WINS in ikcp_flush
 		// tell remote my window size
 		kcp.probe |= IKCP_ASK_TELL
-
-		Logf(WARN, "kcp::Recv fast_recover uuid:%v", kcp.uuid)
 	}
 	return
 }
@@ -846,8 +839,6 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 		seg.cmd = IKCP_CMD_WASK
 		makeSpace(IKCP_OVERHEAD)
 		ptr = seg.encode(ptr)
-
-		Logf(WARN, "kcp::flush IKCP_ASK_SEND uuid:%v", kcp.uuid)
 	}
 
 	// flush window probing commands
@@ -855,8 +846,6 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 		seg.cmd = IKCP_CMD_WINS
 		makeSpace(IKCP_OVERHEAD)
 		ptr = seg.encode(ptr)
-
-		Logf(WARN, "kcp::flush IKCP_ASK_TELL uuid:%v", kcp.uuid)
 	}
 
 	kcp.probe = 0
