@@ -788,8 +788,6 @@ func (s *UDPStream) output(buf []byte, xmitMax uint32) {
 }
 
 func (s *UDPStream) input(data []byte) {
-	// Logf(DEBUG, "UDPStream::input uuid:%v accepted:%v len:%v", s.uuid, s.accepted, len(data))
-
 	var kcpInErrors uint64
 
 	s.mu.Lock()
@@ -813,8 +811,9 @@ func (s *UDPStream) input(data []byte) {
 	acklen := len(s.kcp.acklist)
 	immediately := (s.ackNoDelay && acklen > 0) || uint32(acklen) > s.ackNoDelayCount || (float32(acklen)/float32(s.kcp.snd_wnd) > s.ackNoDelayRatio)
 	s.mu.Unlock()
-
 	s.notifyFlushEvent(immediately)
+
+	// Logf(DEBUG, "UDPStream::input uuid:%v accepted:%v len:%v immediately:%v", s.uuid, s.accepted, len(data), immediately)
 
 	atomic.AddUint64(&DefaultSnmp.InPkts, 1)
 	atomic.AddUint64(&DefaultSnmp.InBytes, uint64(len(data)))
