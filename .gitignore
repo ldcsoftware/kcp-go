@@ -24,5 +24,4 @@ _testmain.go
 *.prof
 
 .vscode
-sample/build/bin/*
-sample/build/bin_linux/*
+sample/bin/*
