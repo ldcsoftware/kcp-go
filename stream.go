@@ -333,9 +333,7 @@ func (s *UDPStream) Read(b []byte) (n int, err error) {
 				n += copyn
 				atomic.AddUint64(&DefaultSnmp.BytesReceived, uint64(copyn))
 				if n == len(b) {
-					if s.kcp.probe_ask_tell() {
-						s.notifyFlushEvent(true)
-					}
+					s.notifyFlushEvent(s.kcp.probe_ask_tell())
 					s.mu.Unlock()
 					return n, nil
 				}
@@ -358,16 +356,12 @@ func (s *UDPStream) Read(b []byte) (n int, err error) {
 				}
 				atomic.AddUint64(&DefaultSnmp.BytesReceived, uint64(copyn))
 				if n == len(b) || err != nil {
-					if s.kcp.probe_ask_tell() {
-						s.notifyFlushEvent(true)
-					}
+					s.notifyFlushEvent(s.kcp.probe_ask_tell())
 					s.mu.Unlock()
 					return n, err
 				}
 			} else if n > 0 {
-				if s.kcp.probe_ask_tell() {
-					s.notifyFlushEvent(true)
-				}
+				s.notifyFlushEvent(s.kcp.probe_ask_tell())
 				s.mu.Unlock()
 				return n, nil
 			} else {
@@ -813,7 +807,7 @@ func (s *UDPStream) input(data []byte) {
 	s.mu.Unlock()
 	s.notifyFlushEvent(immediately)
 
-	// Logf(DEBUG, "UDPStream::input uuid:%v accepted:%v len:%v immediately:%v", s.uuid, s.accepted, len(data), immediately)
+	// Logf(DEBUG, "UDPStream::input uuid:%v accepted:%v len:%v rmtWnd:%v mmediately:%v", s.uuid, s.accepted, len(data), s.kcp.rmt_wnd, immediately)
 
 	atomic.AddUint64(&DefaultSnmp.InPkts, 1)
 	atomic.AddUint64(&DefaultSnmp.InBytes, uint64(len(data)))
