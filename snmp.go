@@ -148,38 +148,48 @@ func (s *Snmp) Reset() {
 	atomic.StoreUint64(&s.Parallels, 0)
 }
 
-var mu sync.Mutex
-
 func getSnmp(remotes []string) *Snmp {
 	var snmp *Snmp
+	Snmps.RLock()
 	for _, addr := range remotes {
 		// KEY: since remotes must act like "127.0.0.1:8000", we ignore the validation
 		// TODO: if we use IPV6, we need change there
 		IP := addr[:strings.Index(addr, ":")]
-		if snmpInf, ok := Snmps.Load(IP); ok {
-			snmp = snmpInf.(*Snmp)
+		if snmpPtr, ok := Snmps.sMap[IP]; ok {
+			snmp = snmpPtr
 			break
 		}
 	}
+	Snmps.RUnlock()
 	if snmp == nil {
-		mu.Lock()
+		Snmps.Lock()
 		snmp = newSnmp()
 		// store snmp into addr map
 		for _, addr := range remotes {
 			IP := addr[:strings.Index(addr, ":")]
-			Snmps.Store(IP, snmp)
+			Snmps.sMap[IP] = snmp
 		}
-		mu.Unlock()
+		Snmps.Unlock()
 	}
 	return snmp
+}
+
+// SnmpMap use for store IP -> snmp map
+type SnmpMap struct {
+	sync.RWMutex
+	sMap map[string]*Snmp
 }
 
 // DefaultSnmp is the global KCP connection statistics collector
 var DefaultSnmp *Snmp
 
 // Snmps store the map of hostname to snmp
-var Snmps sync.Map
+var Snmps *SnmpMap
 
 func init() {
 	DefaultSnmp = newSnmp()
+	Snmps = new(SnmpMap)
+	Snmps.Lock()
+	Snmps.sMap = make(map[string]*Snmp)
+	Snmps.Unlock()
 }
