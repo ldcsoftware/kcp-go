@@ -2,6 +2,7 @@ package kcp
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -145,6 +146,32 @@ func (s *Snmp) Reset() {
 	atomic.StoreUint64(&s.LostSegs, 0)
 	atomic.StoreUint64(&s.RepeatSegs, 0)
 	atomic.StoreUint64(&s.Parallels, 0)
+}
+
+var mu sync.Mutex
+
+func getSnmp(remotes []string) *Snmp {
+	var snmp *Snmp
+	for _, addr := range remotes {
+		// KEY: since remotes must act like "127.0.0.1:8000", we ignore the validation
+		// TODO: if we use IPV6, we need change there
+		IP := addr[:strings.Index(addr, ":")]
+		if snmpInf, ok := Snmps.Load(IP); ok {
+			snmp = snmpInf.(*Snmp)
+			break
+		}
+	}
+	if snmp == nil {
+		mu.Lock()
+		snmp = newSnmp()
+		// store snmp into addr map
+		for _, addr := range remotes {
+			IP := addr[:strings.Index(addr, ":")]
+			Snmps.Store(IP, snmp)
+		}
+		mu.Unlock()
+	}
+	return snmp
 }
 
 // DefaultSnmp is the global KCP connection statistics collector

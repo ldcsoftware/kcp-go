@@ -158,24 +158,7 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, pc *paralle
 	stream.pc = pc
 	stream.ackNoDelayRatio = DefaultAckNoDelayRatio
 	stream.ackNoDelayCount = DefaultAckNoDelayCount
-	var snmp *Snmp
-	for _, addr := range remotes {
-		// KEY: since remotes must act like "127.0.0.1:8000", we ignore the validation
-		// TODO: if we use IPV6, we need change there
-		IP := addr[:strings.Index(addr, ":")]
-		if snmpInf, ok := Snmps.Load(IP); ok {
-			snmp = snmpInf.(*Snmp)
-			break
-		}
-	}
-	if snmp == nil {
-		snmp = newSnmp()
-		// store snmp into addr map
-		for _, addr := range remotes {
-			IP := addr[:strings.Index(addr, ":")]
-			Snmps.Store(IP, snmp)
-		}
-	}
+	snmp := getSnmp(remotes)
 	stream.kcp = NewKCP(1, snmp, func(buf []byte, size int, xmitMax uint32) {
 		if size >= IKCP_OVERHEAD+stream.headerSize {
 			stream.output(buf[:size], xmitMax)
