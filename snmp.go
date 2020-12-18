@@ -2,6 +2,7 @@ package kcp
 
 import (
 	"fmt"
+	"sync"
 	"sync/atomic"
 )
 
@@ -148,6 +149,9 @@ func (s *Snmp) Reset() {
 
 // DefaultSnmp is the global KCP connection statistics collector
 var DefaultSnmp *Snmp
+
+// Snmps store the map of hostname to snmp
+var Snmps sync.Map
 
 func init() {
 	DefaultSnmp = newSnmp()

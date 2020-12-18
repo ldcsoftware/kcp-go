@@ -696,48 +696,6 @@ func TestClose(t *testing.T) {
 	}
 }
 
-func TestSNMP(t *testing.T) {
-	Logf(INFO, "DefaultSnmp.Copy:%v", DefaultSnmp.Copy())
-	Logf(INFO, "DefaultSnmp.Header:%v", DefaultSnmp.Header())
-	Logf(INFO, "DefaultSnmp.ToSlice:%v", DefaultSnmp.ToSlice())
-	Logf(INFO, "DefaultSnmp.ToSlice:%v", DefaultSnmp.ToSlice())
-
-	currEstab := DefaultSnmp.CurrEstab
-	Logf(INFO, "start establish:%v", DefaultSnmp.CurrEstab)
-
-	locals := []string{"127.0.0.1:10001"}
-	remotes := []string{"127.0.0.1:10002"}
-	_, err := clientTransport.Open(locals, remotes)
-	if err == nil {
-		t.Fatalf("test snmp failed")
-	}
-
-	Logf(INFO, "open invalid establish:%v", DefaultSnmp.CurrEstab)
-	if currEstab != DefaultSnmp.CurrEstab {
-		t.Fatalf("test snmp failed")
-	}
-
-	go echoServer()
-
-	stream, err := clientTransport.Open(clientSel.PickAddrs(ipsCount))
-	if err != nil {
-		t.Fatalf("test snmp failed")
-	}
-
-	Logf(INFO, "connect establish:%v", DefaultSnmp.CurrEstab)
-	if currEstab+2 != DefaultSnmp.CurrEstab {
-		t.Fatalf("test snmp failed")
-	}
-
-	stream.Close()
-	time.Sleep(time.Millisecond * 500)
-
-	Logf(INFO, "after close establish:%v", DefaultSnmp.CurrEstab)
-	if currEstab != DefaultSnmp.CurrEstab {
-		t.Fatalf("test snmp failed")
-	}
-}
-
 func TestParallel1024CLIENT_64BMSG_64CNT(t *testing.T) {
 	var wg sync.WaitGroup
 	N := 200
@@ -924,70 +882,6 @@ func randString(n int) string {
 	return string(b)
 }
 
-func TestTCPFileTransfer(t *testing.T) {
-	lFile := randString(1024 * 512)
-	lReader := strings.NewReader(lFile)
-	rFile := randString(1024 * 1024 * 16)
-	rReader := strings.NewReader(rFile)
-
-	lh := md5.New()
-	_, err := io.Copy(lh, lReader)
-	lFileHash := lh.Sum(nil)
-	Logf(INFO, "lFileLen:%v hash:%v err:%v", len(lFile), lFileHash, err)
-
-	rh := md5.New()
-	_, err = io.Copy(rh, rReader)
-	rFileHash := rh.Sum(nil)
-	Logf(INFO, "rFileLen:%v hash:%v err:%v", len(rFile), rFileHash, err)
-
-	lReader.Seek(0, io.SeekStart)
-	rReader.Seek(0, io.SeekStart)
-
-	l, err := net.Listen("tcp", "100.100.35.71:")
-	if err != nil {
-		t.Fatalf("Listen failed. err: %v", err)
-	}
-
-	var serverConn net.Conn
-	var clientConn net.Conn
-
-	go func() {
-		clientConn, err = net.Dial("tcp", l.Addr().String())
-		if err != nil {
-			fmt.Println("Error connecting:", err)
-			os.Exit(1)
-		}
-	}()
-
-	go func() {
-		serverConn, err = l.Accept()
-		if err != nil {
-			t.Fatalf("FileTransferServer Accept stream %v", err)
-		}
-	}()
-
-	for {
-		if serverConn != nil && clientConn != nil {
-			break
-		}
-		time.Sleep(time.Millisecond * 100)
-	}
-
-	finish := make(chan struct{}, 2)
-	go func() {
-		FileTransfer(t, serverConn, rReader, lFileHash)
-		finish <- struct{}{}
-	}()
-
-	go func() {
-		FileTransfer(t, clientConn, lReader, rFileHash)
-		finish <- struct{}{}
-	}()
-
-	<-finish
-	<-finish
-}
-
 func TestUDPFileTransfer(t *testing.T) {
 	lFile := randString(1024)
 	lReader := strings.NewReader(lFile)
@@ -1051,7 +945,8 @@ func TestUDPFileTransfer(t *testing.T) {
 }
 
 func TestAckXmit(t *testing.T) {
-	kcp := NewKCP(1, func(buf []byte, size int, xmitMax uint32) {})
+	snmp := newSnmp()
+	kcp := NewKCP(1, snmp, func(buf []byte, size int, xmitMax uint32) {})
 	for i := 0; i < IKCP_WND_RCV+2; i++ {
 		kcp.ack_push(uint32(i), 0)
 	}
@@ -1095,7 +990,8 @@ func TestAckXmit(t *testing.T) {
 }
 
 func BenchmarkFlush(b *testing.B) {
-	kcp := NewKCP(1, func(buf []byte, size int, xmitMax uint32) {})
+	snmp := newSnmp()
+	kcp := NewKCP(1, snmp, func(buf []byte, size int, xmitMax uint32) {})
 	kcp.snd_buf = make([]segment, 1024)
 	for k := range kcp.snd_buf {
 		kcp.snd_buf[k].xmit = 1

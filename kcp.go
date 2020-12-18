@@ -136,7 +136,7 @@ type segment struct {
 }
 
 // encode a segment into buffer
-func (seg *segment) encode(ptr []byte) []byte {
+func (seg *segment) encode(ptr []byte, snmp *Snmp) []byte {
 	ptr = ikcp_encode32u(ptr, seg.conv)
 	ptr = ikcp_encode8u(ptr, seg.cmd)
 	ptr = ikcp_encode8u(ptr, seg.frg)
@@ -145,7 +145,8 @@ func (seg *segment) encode(ptr []byte) []byte {
 	ptr = ikcp_encode32u(ptr, seg.sn)
 	ptr = ikcp_encode32u(ptr, seg.una)
 	ptr = ikcp_encode32u(ptr, uint32(len(seg.data)))
-	atomic.AddUint64(&DefaultSnmp.OutSegs, 1)
+	// TODO: cannot statistic this ?
+	atomic.AddUint64(&snmp.OutSegs, 1)
 	return ptr
 }
 
@@ -176,6 +177,7 @@ type KCP struct {
 	buffer   []byte
 	reserved int
 	output   output_callback
+	snmp     *Snmp
 }
 
 type ackItem struct {
@@ -193,7 +195,7 @@ type ackXmitItem struct {
 // 'conv' must be equal in the connection peers, or else data will be silently rejected.
 //
 // 'output' function will be called whenever these is data to be sent on wire.
-func NewKCP(conv uint32, output output_callback) *KCP {
+func NewKCP(conv uint32, snmp *Snmp, output output_callback) *KCP {
 	kcp := new(KCP)
 	kcp.conv = conv
 	kcp.snd_wnd = IKCP_WND_SND
@@ -209,6 +211,8 @@ func NewKCP(conv uint32, output output_callback) *KCP {
 	kcp.ssthresh = IKCP_THRESH_INIT
 	kcp.dead_link = IKCP_DEADLINK
 	kcp.output = output
+	// TODO: not sure all kcp object use same DefaultSnmp or not
+	kcp.snmp = snmp
 	return kcp
 }
 
@@ -674,7 +678,7 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 				}
 			}
 			if regular && repeat {
-				atomic.AddUint64(&DefaultSnmp.RepeatSegs, 1)
+				atomic.AddUint64(&kcp.snmp.RepeatSegs, 1)
 			}
 		} else if cmd == IKCP_CMD_WASK {
 			// ready to send back IKCP_CMD_WINS in Ikcp_flush
@@ -689,7 +693,7 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 		inSegs++
 		data = data[length:]
 	}
-	atomic.AddUint64(&DefaultSnmp.InSegs, inSegs)
+	atomic.AddUint64(&kcp.snmp.InSegs, inSegs)
 
 	// update rtt with the latest ts
 	// ignore the FEC packet
@@ -796,7 +800,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 		// filter jitters caused by bufferbloat
 		if _itimediff(ack.sn, kcp.rcv_nxt) >= 0 || len(kcp.acklist)-1 == i {
 			seg.sn, seg.ts = ack.sn, ack.ts
-			ptr = seg.encode(ptr)
+			ptr = seg.encode(ptr, kcp.snmp)
 			xmit := kcp.incre_ackxmit(seg.sn)
 			if xmit > xmitMax {
 				xmitMax = xmit
@@ -838,14 +842,14 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 	if (kcp.probe & IKCP_ASK_SEND) != 0 {
 		seg.cmd = IKCP_CMD_WASK
 		makeSpace(IKCP_OVERHEAD)
-		ptr = seg.encode(ptr)
+		ptr = seg.encode(ptr, kcp.snmp)
 	}
 
 	// flush window probing commands
 	if (kcp.probe & IKCP_ASK_TELL) != 0 {
 		seg.cmd = IKCP_CMD_WINS
 		makeSpace(IKCP_OVERHEAD)
-		ptr = seg.encode(ptr)
+		ptr = seg.encode(ptr, kcp.snmp)
 	}
 
 	kcp.probe = 0
@@ -930,7 +934,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 
 			need := IKCP_OVERHEAD + len(segment.data)
 			makeSpace(need)
-			ptr = segment.encode(ptr)
+			ptr = segment.encode(ptr, kcp.snmp)
 			copy(ptr, segment.data)
 			ptr = ptr[len(segment.data):]
 
@@ -954,18 +958,18 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 	// counter updates
 	sum := lostSegs
 	if lostSegs > 0 {
-		atomic.AddUint64(&DefaultSnmp.LostSegs, lostSegs)
+		atomic.AddUint64(&kcp.snmp.LostSegs, lostSegs)
 	}
 	if fastRetransSegs > 0 {
-		atomic.AddUint64(&DefaultSnmp.FastRetransSegs, fastRetransSegs)
+		atomic.AddUint64(&kcp.snmp.FastRetransSegs, fastRetransSegs)
 		sum += fastRetransSegs
 	}
 	if earlyRetransSegs > 0 {
-		atomic.AddUint64(&DefaultSnmp.EarlyRetransSegs, earlyRetransSegs)
+		atomic.AddUint64(&kcp.snmp.EarlyRetransSegs, earlyRetransSegs)
 		sum += earlyRetransSegs
 	}
 	if sum > 0 {
-		atomic.AddUint64(&DefaultSnmp.RetransSegs, sum)
+		atomic.AddUint64(&kcp.snmp.RetransSegs, sum)
 	}
 
 	// cwnd update

@@ -158,8 +158,25 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, pc *paralle
 	stream.pc = pc
 	stream.ackNoDelayRatio = DefaultAckNoDelayRatio
 	stream.ackNoDelayCount = DefaultAckNoDelayCount
-
-	stream.kcp = NewKCP(1, func(buf []byte, size int, xmitMax uint32) {
+	var snmp *Snmp
+	for _, addr := range remotes {
+		// KEY: since remotes must act like "127.0.0.1:8000", we ignore the validation
+		// TODO: if we use IPV6, we need change there
+		IP := addr[:strings.Index(addr, ":")]
+		if snmpInf, ok := Snmps.Load(IP); ok {
+			snmp = snmpInf.(*Snmp)
+			break
+		}
+	}
+	if snmp == nil {
+		snmp = newSnmp()
+		// store snmp into addr map
+		for _, addr := range remotes {
+			IP := addr[:strings.Index(addr, ":")]
+			Snmps.Store(IP, snmp)
+		}
+	}
+	stream.kcp = NewKCP(1, snmp, func(buf []byte, size int, xmitMax uint32) {
 		if size >= IKCP_OVERHEAD+stream.headerSize {
 			stream.output(buf[:size], xmitMax)
 		}
@@ -333,7 +350,7 @@ func (s *UDPStream) Read(b []byte) (n int, err error) {
 				copyn := copy(b[n:], s.bufptr)
 				s.bufptr = s.bufptr[copyn:]
 				n += copyn
-				atomic.AddUint64(&DefaultSnmp.BytesReceived, uint64(copyn))
+				atomic.AddUint64(&s.kcp.snmp.BytesReceived, uint64(copyn))
 				if n == len(b) {
 					s.notifyFlushEvent(s.kcp.probe_ask_tell())
 					s.mu.Unlock()
@@ -356,7 +373,7 @@ func (s *UDPStream) Read(b []byte) (n int, err error) {
 				if flag == PSH {
 					n += copyn
 				}
-				atomic.AddUint64(&DefaultSnmp.BytesReceived, uint64(copyn))
+				atomic.AddUint64(&s.kcp.snmp.BytesReceived, uint64(copyn))
 				if n == len(b) || err != nil {
 					s.notifyFlushEvent(s.kcp.probe_ask_tell())
 					s.mu.Unlock()
@@ -454,7 +471,7 @@ func (s *UDPStream) WriteBuffer(flag byte, b []byte, heartbeat bool) (n int, err
 			s.mu.Unlock()
 			s.notifyFlushEvent(immediately)
 
-			atomic.AddUint64(&DefaultSnmp.BytesSent, uint64(n))
+			atomic.AddUint64(&s.kcp.snmp.BytesSent, uint64(n))
 
 			// cost := time.Since(start)
 			// Logf(DEBUG, "UDPStream::Write finish uuid:%v accepted:%v randId:%v waitsnd:%v snd_wnd:%v rmt_wnd:%v snd_buf:%v snd_queue:%v cost:%v len:%v", s.uuid, s.accepted, randId, waitsnd, s.kcp.snd_wnd, s.kcp.rmt_wnd, len(s.kcp.snd_buf), len(s.kcp.snd_queue), cost, n)
@@ -518,7 +535,7 @@ func (s *UDPStream) Close() error {
 		return nil
 	}
 	s.state = StateClosed
-	atomic.AddUint64(&DefaultSnmp.CurrEstab, ^uint64(0))
+	atomic.AddUint64(&s.kcp.snmp.CurrEstab, ^uint64(0))
 	if s.hp != nil {
 		s.hp.dec()
 	}
@@ -565,7 +582,7 @@ func (s *UDPStream) dial(locals []string, timeout time.Duration) error {
 		s.establish()
 		return nil
 	case <-dialTimer.C:
-		atomic.AddUint64(&DefaultSnmp.DialTimeout, 1)
+		atomic.AddUint64(&s.kcp.snmp.DialTimeout, 1)
 		return errTimeout
 	}
 }
@@ -613,10 +630,10 @@ func (s *UDPStream) accept() (err error) {
 func (s *UDPStream) establish() {
 	Logf(INFO, "UDPStream::establish uuid:%v accepted:%v", s.uuid, s.accepted)
 
-	currestab := atomic.AddUint64(&DefaultSnmp.CurrEstab, 1)
-	maxconn := atomic.LoadUint64(&DefaultSnmp.MaxConn)
+	currestab := atomic.AddUint64(&s.kcp.snmp.CurrEstab, 1)
+	maxconn := atomic.LoadUint64(&s.kcp.snmp.MaxConn)
 	if currestab > maxconn {
-		atomic.CompareAndSwapUint64(&DefaultSnmp.MaxConn, maxconn, currestab)
+		atomic.CompareAndSwapUint64(&s.kcp.snmp.MaxConn, maxconn, currestab)
 	}
 
 	s.mu.Lock()
@@ -741,7 +758,7 @@ func (s *UDPStream) parallelTun(xmitMax uint32) (parallel int) {
 	} else if xmitMax >= s.parallelXmit && s.parallelExpire.IsZero() {
 		Logf(INFO, "UDPStream::parallelTun enter uuid:%v accepted:%v parallelXmit:%v xmitMax:%v", s.uuid, s.accepted, s.parallelXmit, xmitMax)
 		s.parallelExpire = time.Now().Add(s.parallelTime)
-		atomic.AddUint64(&DefaultSnmp.Parallels, 1)
+		atomic.AddUint64(&s.kcp.snmp.Parallels, 1)
 		if s.hp != nil {
 			s.hp.incParallel()
 		}
@@ -809,10 +826,10 @@ func (s *UDPStream) input(data []byte) {
 
 	// Logf(DEBUG, "UDPStream::input uuid:%v accepted:%v len:%v rmtWnd:%v mmediately:%v", s.uuid, s.accepted, len(data), s.kcp.rmt_wnd, immediately)
 
-	atomic.AddUint64(&DefaultSnmp.InPkts, 1)
-	atomic.AddUint64(&DefaultSnmp.InBytes, uint64(len(data)))
+	atomic.AddUint64(&s.kcp.snmp.InPkts, 1)
+	atomic.AddUint64(&s.kcp.snmp.InBytes, uint64(len(data)))
 	if kcpInErrors > 0 {
-		atomic.AddUint64(&DefaultSnmp.KCPInErrors, kcpInErrors)
+		atomic.AddUint64(&s.kcp.snmp.KCPInErrors, kcpInErrors)
 	}
 }
 
