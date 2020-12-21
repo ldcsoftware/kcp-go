@@ -163,11 +163,14 @@ func getSnmp(remotes []string) *Snmp {
 	Snmps.RUnlock()
 	if snmp == nil {
 		Snmps.Lock()
-		snmp = newSnmp()
-		// store snmp into addr map
-		for _, addr := range remotes {
-			IP := addr[:strings.Index(addr, ":")]
-			Snmps.sMap[IP] = snmp
+		IP := remotes[0][:strings.Index(remotes[0], ":")]
+		if _, ok := Snmps.sMap[IP]; !ok {
+			snmp = newSnmp()
+			// store snmp into addr map
+			for _, addr := range remotes {
+				IP := addr[:strings.Index(addr, ":")]
+				Snmps.sMap[IP] = snmp
+			}
 		}
 		Snmps.Unlock()
 	}
@@ -189,7 +192,5 @@ var Snmps *SnmpMap
 func init() {
 	DefaultSnmp = newSnmp()
 	Snmps = new(SnmpMap)
-	Snmps.Lock()
 	Snmps.sMap = make(map[string]*Snmp)
-	Snmps.Unlock()
 }
