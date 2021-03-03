@@ -42,7 +42,7 @@ type (
 		chFlush chan struct{} // notify Write
 
 		// packets waiting to be sent on wire
-		msgqs           []MsgQueue
+		msgqs           []*MsgQueue
 		msgqIdx         int64
 		xconn           batchConn // for x/net
 		xconnWriteError error
@@ -77,7 +77,10 @@ func NewUDPTunnel(laddr string, inputcb input_callback) (tunnel *UDPTunnel, err 
 	tunnel.addr = addr
 	tunnel.die = make(chan struct{})
 	tunnel.chFlush = make(chan struct{}, 1)
-	tunnel.msgqs = make([]MsgQueue, DefaultMsgQueueCount)
+	tunnel.msgqs = make([]*MsgQueue, DefaultMsgQueueCount)
+	for i := 0; i < len(tunnel.msgqs); i++ {
+		tunnel.msgqs[i] = &MsgQueue{}
+	}
 
 	// cast to writebatch conn
 	if addr.IP.To4() != nil {
