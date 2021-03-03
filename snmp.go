@@ -41,8 +41,8 @@ type Snmp struct {
 
 func newSnmp() *Snmp {
 	snmp := new(Snmp)
-	snmp.XmitInterval = make([]uint64, 0, STAT_XMIT_MAX)
-	snmp.XmitCount = make([]uint64, 0, STAT_XMIT_MAX)
+	snmp.XmitInterval = make([]uint64, STAT_XMIT_MAX)
+	snmp.XmitCount = make([]uint64, STAT_XMIT_MAX)
 	return snmp
 }
 
