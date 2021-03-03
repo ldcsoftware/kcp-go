@@ -211,8 +211,7 @@ func sliceReset(vi []uint64) {
 }
 
 func statXmitInterval(xmit uint32, interval int32) {
-	//ignore xmit == 1 stat
-	if 1 < xmit && xmit <= STAT_XMIT_MAX {
+	if 0 < xmit && xmit <= STAT_XMIT_MAX {
 		atomic.AddUint64(&DefaultSnmp.XmitInterval[xmit-1], uint64(interval))
 		atomic.AddUint64(&DefaultSnmp.XmitCount[xmit-1], 1)
 	}
