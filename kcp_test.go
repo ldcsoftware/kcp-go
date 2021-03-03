@@ -694,9 +694,15 @@ func TestClose(t *testing.T) {
 }
 
 func TestSNMP(t *testing.T) {
+	if len(DefaultSnmp.Header()) != len(DefaultSnmp.ToSlice()) {
+		t.Fatalf("test snmp header not equal with value")
+	}
+	for i := 0; i < STAT_XMIT_MAX; i++ {
+		statXmitInterval(uint32(i+1), 2)
+	}
+
 	Logf(INFO, "DefaultSnmp.Copy:%v", DefaultSnmp.Copy())
 	Logf(INFO, "DefaultSnmp.Header:%v", DefaultSnmp.Header())
-	Logf(INFO, "DefaultSnmp.ToSlice:%v", DefaultSnmp.ToSlice())
 	Logf(INFO, "DefaultSnmp.ToSlice:%v", DefaultSnmp.ToSlice())
 
 	currEstab := DefaultSnmp.CurrEstab
