@@ -190,8 +190,6 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, sel TunnelS
 	stream.kcp.dead_link = DefaultDeadLink
 	stream.kcp.cwnd = 1
 
-	stream.sched.Put(stream.fnvKey, TS_NORMAL, stream.hrtTick, HeartbeatIntervalMs)
-
 	Logf(INFO, "NewUDPStream uuid:%v accepted:%v locals:%v remotes:%v", uuid, accepted, locals, remotes)
 	return stream, nil
 }
@@ -451,7 +449,7 @@ func (s *UDPStream) WriteFlag(flag byte, b []byte) (n int, err error) {
 }
 
 // WriteBuffers write a vector of byte slices to the underlying connection
-func (s *UDPStream) WriteBuffer(flag byte, b []byte, heartbeat bool) (n int, err error) {
+func (s *UDPStream) WriteBuffer(flag byte, b []byte, noBlock bool) (n int, err error) {
 	select {
 	case <-s.chClose:
 		return 0, io.ErrClosedPipe
@@ -495,9 +493,9 @@ func (s *UDPStream) WriteBuffer(flag byte, b []byte, heartbeat bool) (n int, err
 			// cost := time.Since(start)
 			// Logf(DEBUG, "UDPStream::Write finish uuid:%v accepted:%v randId:%v waitsnd:%v snd_wnd:%v rmt_wnd:%v snd_buf:%v snd_queue:%v cost:%v len:%v", s.uuid, s.accepted, randId, waitsnd, s.kcp.snd_wnd, s.kcp.rmt_wnd, len(s.kcp.snd_buf), len(s.kcp.snd_queue), cost, n)
 			return n, nil
-		} else if heartbeat {
+		} else if noBlock {
 			s.mu.Unlock()
-			return len(b), nil
+			return 0, nil
 		}
 		// Logf(DEBUG, "UDPStream::Write block uuid:%v accepted:%v randId:%v waitsnd:%v snd_wnd:%v rmt_wnd:%v snd_buf:%v snd_queue:%v", s.uuid, s.accepted, randId, waitsnd, s.kcp.snd_wnd, s.kcp.rmt_wnd, len(s.kcp.snd_buf), len(s.kcp.snd_queue))
 
@@ -681,8 +679,8 @@ func (s *UDPStream) clean() {
 	s.kcp.ReleaseTX()
 	s.state = StateCleaned
 	s.mu.Unlock()
-	s.cleancb(s.uuid)
 	s.sched.Clean(s.fnvKey)
+	s.cleancb(s.uuid)
 }
 
 func (s *UDPStream) hrtTick() {
