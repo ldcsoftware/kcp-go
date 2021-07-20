@@ -584,7 +584,6 @@ func (s *UDPStream) dial(locals []string, timeout time.Duration) error {
 		return err
 	}
 	s.WriteFlag(SYN, dialBuf)
-	s.flush()
 
 	dialTimer := time.NewTimer(timeout)
 	defer dialTimer.Stop()
@@ -640,7 +639,6 @@ func (s *UDPStream) accept() (err error) {
 	}
 	s.mu.Unlock()
 
-	s.flush()
 	s.establish()
 	return err
 }
@@ -651,7 +649,7 @@ func (s *UDPStream) establish() {
 	currestab := atomic.AddUint64(&DefaultSnmp.CurrEstab, 1)
 	atomicSetMax(&DefaultSnmp.MaxConn, currestab)
 
-	s.sched.Put(s.fnvKey, TS_NORMAL, s.hrtTick, HeartbeatIntervalMs)
+	s.heartbeat()
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -683,7 +681,7 @@ func (s *UDPStream) clean() {
 	s.cleancb(s.uuid)
 }
 
-func (s *UDPStream) hrtTick() {
+func (s *UDPStream) heartbeat() {
 	select {
 	case <-s.chClose:
 		return
@@ -692,7 +690,7 @@ func (s *UDPStream) hrtTick() {
 
 	Logf(DEBUG, "UDPStream::heartbeat uuid:%v accepted:%v", s.uuid, s.accepted)
 	s.WriteFlag(HRT, nil)
-	s.sched.Put(s.fnvKey, TS_NORMAL, s.hrtTick, HeartbeatIntervalMs)
+	s.sched.Put(s.fnvKey, TS_NORMAL, s.heartbeat, HeartbeatIntervalMs)
 }
 
 // flush sends data in txqueue if there is any
@@ -757,6 +755,9 @@ func (s *UDPStream) tryParallel(current uint32) bool {
 }
 
 func (s *UDPStream) getParallel(current, xmitMax, delayts uint32) (parallel int, trigger bool) {
+	if s.parallelDelayMs == 0 || s.kcp.snd_una == 0 {
+		return len(s.tunnels), false
+	}
 	if delayts >= s.parallelDelayMs {
 		trigger = s.tryParallel(current)
 	}
@@ -777,13 +778,7 @@ func (s *UDPStream) getParallel(current, xmitMax, delayts uint32) (parallel int,
 }
 
 func (s *UDPStream) output(buf []byte, current, xmitMax, delayts uint32) {
-	var appendCount int
-	var trigger bool
-	if s.parallelDelayMs == 0 || s.state == StateNone {
-		appendCount = len(s.tunnels)
-	} else {
-		appendCount, trigger = s.getParallel(current, xmitMax, delayts)
-	}
+	appendCount, trigger := s.getParallel(current, xmitMax, delayts)
 	for i := len(s.msgss); i < appendCount; i++ {
 		s.msgss = append(s.msgss, make([]ipv4.Message, 0))
 	}
@@ -835,7 +830,10 @@ func (s *UDPStream) input(data []byte) {
 	}
 
 	acklen := len(s.kcp.acklist)
-	immediately := (s.ackNoDelay && acklen > 0) || uint32(acklen) > s.ackNoDelayCount || (float32(acklen)/float32(s.kcp.snd_wnd) > s.ackNoDelayRatio)
+	immediately := (s.ackNoDelay && acklen > 0) ||
+		uint32(acklen) > s.ackNoDelayCount ||
+		(float32(acklen)/float32(s.kcp.snd_wnd) > s.ackNoDelayRatio) ||
+		(s.accepted && s.kcp.rcv_nxt == 1)
 	s.mu.Unlock()
 	s.notifyFlushEvent(immediately)
 
