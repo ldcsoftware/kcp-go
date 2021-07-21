@@ -93,7 +93,7 @@ func NewTimedSched() *TimedSched {
 	return ts
 }
 
-func (ts *TimedSched) newTasks(tasks []timedFunc) (drained bool) {
+func (ts *TimedSched) newTasks(tasks []timedFunc) (bool, uint32) {
 	var top *timedFunc
 	current := currentMs()
 	for k := range tasks {
@@ -106,10 +106,12 @@ func (ts *TimedSched) newTasks(tasks []timedFunc) (drained bool) {
 		} else if task.mode == TS_EXCLUSIVE {
 			if item, ok := ts.keyTimer[task.fnvKey]; ok {
 				heap.Remove(&ts.taskHeap, item.index)
+				delete(ts.keyTimer, task.fnvKey)
 			}
 		}
 		if task.delayMs == 0 || current >= task.expireMs {
 			task.execute()
+			current = currentMs()
 			continue
 		}
 		heap.Push(&ts.taskHeap, &task)
@@ -121,21 +123,16 @@ func (ts *TimedSched) newTasks(tasks []timedFunc) (drained bool) {
 		}
 	}
 	if top != nil {
-		stopped := ts.timer.Stop()
-		if !stopped && !drained {
-			<-ts.timer.C
-		}
 		delta := currentMs() - top.expireMs
 		if delta < 0 {
 			delta = 0
 		}
-		ts.timer.Reset(time.Duration(delta) * time.Millisecond)
-		return true
+		return true, delta
 	}
-	return false
+	return false, 0
 }
 
-func (ts *TimedSched) advanceTasks() bool {
+func (ts *TimedSched) advanceTasks() (bool, uint32) {
 	current := currentMs()
 	for ts.taskHeap.Len() > 0 {
 		task := ts.taskHeap[0]
@@ -147,11 +144,10 @@ func (ts *TimedSched) advanceTasks() bool {
 		}
 		current = currentMs()
 		if current < task.expireMs {
-			ts.timer.Reset(time.Duration(task.expireMs-current) * time.Millisecond)
-			return true
+			return true, task.expireMs - current
 		}
 	}
-	return false
+	return false, 0
 }
 
 func (ts *TimedSched) cleanTasks(cleanKeys []uint32) {
@@ -175,10 +171,22 @@ func (ts *TimedSched) sched() {
 			ts.prependTasks[ts.prependIdx] = ts.prependTasks[ts.prependIdx][:0]
 			ts.prependIdx = (ts.prependIdx + 1) % 2
 			ts.prependLock.Unlock()
-			ts.newTasks(tasks)
+			new, delta := ts.newTasks(tasks)
+			if new {
+				stopped := ts.timer.Stop()
+				if !stopped && !drained {
+					<-ts.timer.C
+				}
+				ts.timer.Reset(time.Duration(delta) * time.Millisecond)
+				drained = false
+			}
 		case <-ts.timer.C:
 			drained = true
-			ts.advanceTasks()
+			new, delta := ts.advanceTasks()
+			if new {
+				ts.timer.Reset(time.Duration(delta) * time.Millisecond)
+				drained = false
+			}
 		case <-ts.chCleanNotify:
 			ts.cleanLock.Lock()
 			ts.cleanTasks(ts.cleanKeys)
@@ -206,7 +214,7 @@ func (ts *TimedSched) Put(fnvkey uint32, mode int, f func(), delayMs uint32) {
 	}
 }
 
-func (ts *TimedSched) Clean(fnvKey uint32) {
+func (ts *TimedSched) Release(fnvKey uint32) {
 	ts.cleanLock.Lock()
 	ts.cleanKeys = append(ts.cleanKeys, fnvKey)
 	ts.cleanLock.Unlock()
