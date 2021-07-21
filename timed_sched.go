@@ -53,8 +53,6 @@ func (h *timedFuncHeap) Pop() interface{} {
 	old := *h
 	n := len(old)
 	task := old[n-1]
-	old[n-1].execute = nil // avoid memory leak
-	old[n-1].index = -1
 	old[n-1] = nil
 	*h = old[0 : n-1]
 	return task
@@ -123,9 +121,10 @@ func (ts *TimedSched) newTasks(tasks []timedFunc) (bool, uint32) {
 		}
 	}
 	if top != nil {
-		delta := currentMs() - top.expireMs
-		if delta < 0 {
-			delta = 0
+		var delta uint32
+		current = currentMs()
+		if top.expireMs > current {
+			delta = top.expireMs - current
 		}
 		return true, delta
 	}
