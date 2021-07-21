@@ -25,7 +25,8 @@ var (
 )
 
 const (
-	CleanTimeoutMs            = 5 * 1000
+	CleanWaitMs               = 3 * 1000
+	ReleaseWaitMs             = 2 * 1000
 	HeartbeatIntervalMs       = 30 * 1000
 	DefaultDeadLink           = 10
 	DefaultAckNoDelayRatio    = 0.7
@@ -66,7 +67,7 @@ const (
 	DV1
 )
 
-type clean_callback func(uuid gouuid.UUID)
+type releaseCallback func(uuid gouuid.UUID)
 
 type (
 	// UDPStream defines a KCP session
@@ -80,7 +81,7 @@ type (
 		locals   []*net.UDPAddr
 		remotes  []*net.UDPAddr
 		accepted bool
-		cleancb  clean_callback
+		releaseF releaseCallback
 		sched    *TimedSched
 
 		// kcp receiving is based on packets
@@ -128,7 +129,7 @@ type (
 )
 
 // newUDPSession create a new udp session for client or server
-func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, sel TunnelSelector, cleancb clean_callback) (stream *UDPStream, err error) {
+func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, sel TunnelSelector, releaseF releaseCallback) (stream *UDPStream, err error) {
 	tunnels := sel.Pick(remotes)
 	if len(tunnels) == 0 || len(tunnels) != len(remotes) {
 		return nil, errTunnelPick
@@ -163,7 +164,7 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, sel TunnelS
 	stream.uuid = uuid
 	stream.fnvKey = fnv32(uuid)
 	stream.sel = sel
-	stream.cleancb = cleancb
+	stream.releaseF = releaseF
 	stream.sched = SystemTimedSched.Pick(stream.fnvKey)
 	if uuid.Version() == gouuid.V1 {
 		stream.headerSize = gouuid.Size
@@ -543,7 +544,7 @@ func (s *UDPStream) Close() error {
 
 	s.WriteFlag(RST, nil)
 	close(s.chClose)
-	s.sched.Put(s.fnvKey, TS_NORMAL, s.clean, CleanTimeoutMs)
+	s.sched.Put(s.fnvKey, TS_NORMAL, s.clean, CleanWaitMs)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -673,14 +674,24 @@ func (s *UDPStream) reset() {
 
 func (s *UDPStream) clean() {
 	Logf(INFO, "UDPStream::clean uuid:%v accepted:%v", s.uuid, s.accepted)
+
 	s.mu.Lock()
-	s.kcp.ReleaseTX()
 	s.state = StateCleaned
 	s.mu.Unlock()
-	s.sched.Clean(s.fnvKey)
-	s.cleancb(s.uuid)
+	s.sched.Put(s.fnvKey, TS_NORMAL, s.release, ReleaseWaitMs)
 }
 
+func (s *UDPStream) release() {
+	Logf(INFO, "UDPStream::release uuid:%v accepted:%v", s.uuid, s.accepted)
+
+	s.mu.Lock()
+	s.kcp.ReleaseTX()
+	s.mu.Unlock()
+	s.sched.Release(s.fnvKey)
+	s.releaseF(s.uuid)
+}
+
+//heartbeat may delay 30s - 3s - 2s after close
 func (s *UDPStream) heartbeat() {
 	select {
 	case <-s.chClose:
@@ -698,7 +709,10 @@ func (s *UDPStream) heartbeat() {
 func (s *UDPStream) flush() {
 	var interval uint32
 	s.mu.Lock()
-	state := s.state
+	if s.state == StateCleaned {
+		s.mu.Unlock()
+		return
+	}
 	if s.kcp.state != 0xFFFFFFFF {
 		interval = s.kcp.flush(false)
 		if s.kcp.state == 0xFFFFFFFF {
@@ -713,6 +727,10 @@ func (s *UDPStream) flush() {
 		s.mu.Unlock()
 		if notifyWrite {
 			s.notifyWriteEvent()
+		}
+
+		if interval != 0 {
+			s.sched.Put(s.fnvKey, TS_EXCLUSIVE, s.flush, interval)
 		}
 		return
 	}
@@ -734,7 +752,7 @@ func (s *UDPStream) flush() {
 		}
 	}
 
-	if interval != 0 && state != StateCleaned {
+	if interval != 0 {
 		s.sched.Put(s.fnvKey, TS_EXCLUSIVE, s.flush, interval)
 	}
 }
@@ -809,6 +827,10 @@ func (s *UDPStream) input(data []byte) {
 	trigger, replica := s.decodeFrameHeader(data)
 
 	s.mu.Lock()
+	if s.state == StateCleaned {
+		s.mu.Unlock()
+		return
+	}
 	if trigger {
 		s.tryParallel(currentMs())
 	}
@@ -830,10 +852,7 @@ func (s *UDPStream) input(data []byte) {
 	}
 
 	acklen := len(s.kcp.acklist)
-	immediately := (s.ackNoDelay && acklen > 0) ||
-		uint32(acklen) > s.ackNoDelayCount ||
-		(float32(acklen)/float32(s.kcp.snd_wnd) > s.ackNoDelayRatio) ||
-		(s.accepted && s.kcp.rcv_nxt == 1)
+	immediately := (s.ackNoDelay && acklen > 0) || uint32(acklen) > s.ackNoDelayCount || (float32(acklen)/float32(s.kcp.snd_wnd) > s.ackNoDelayRatio)
 	s.mu.Unlock()
 	s.notifyFlushEvent(immediately)
 
