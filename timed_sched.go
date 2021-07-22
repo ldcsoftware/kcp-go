@@ -11,6 +11,7 @@ const (
 	TS_NORMAL = iota
 	TS_ONCE
 	TS_EXCLUSIVE
+	TS_REMOVE
 )
 
 // SystemTimedSched is the library level timed-scheduler
@@ -66,10 +67,6 @@ type TimedSched struct {
 	prependLock     sync.Mutex
 	chPrependNotify chan struct{}
 
-	cleanKeys     []uint32
-	cleanLock     sync.Mutex
-	chCleanNotify chan struct{}
-
 	// tasks will be distributed through chTask
 	chTask   chan timedFunc
 	keyTimer map[uint32]*timedFunc
@@ -82,7 +79,6 @@ type TimedSched struct {
 func NewTimedSched() *TimedSched {
 	ts := new(TimedSched)
 	ts.chPrependNotify = make(chan struct{}, 1)
-	ts.chCleanNotify = make(chan struct{}, 1)
 	ts.chTask = make(chan timedFunc)
 	ts.keyTimer = make(map[uint32]*timedFunc)
 	ts.timer = time.NewTimer(0)
@@ -106,6 +102,12 @@ func (ts *TimedSched) newTasks(tasks []timedFunc) (bool, uint32) {
 				heap.Remove(&ts.taskHeap, item.index)
 				delete(ts.keyTimer, task.fnvKey)
 			}
+		} else if task.mode == TS_REMOVE {
+			if item, ok := ts.keyTimer[task.fnvKey]; ok {
+				heap.Remove(&ts.taskHeap, item.index)
+				delete(ts.keyTimer, task.fnvKey)
+			}
+			continue
 		}
 		if task.delayMs == 0 || current >= task.expireMs {
 			task.execute()
@@ -149,16 +151,6 @@ func (ts *TimedSched) advanceTasks() (bool, uint32) {
 	return false, 0
 }
 
-func (ts *TimedSched) cleanTasks(cleanKeys []uint32) {
-	for k := range cleanKeys {
-		timer, ok := ts.keyTimer[cleanKeys[k]]
-		if ok {
-			heap.Remove(&ts.taskHeap, timer.index)
-			delete(ts.keyTimer, cleanKeys[k])
-		}
-	}
-}
-
 func (ts *TimedSched) sched() {
 	drained := false
 
@@ -186,17 +178,11 @@ func (ts *TimedSched) sched() {
 				ts.timer.Reset(time.Duration(delta) * time.Millisecond)
 				drained = false
 			}
-		case <-ts.chCleanNotify:
-			ts.cleanLock.Lock()
-			ts.cleanTasks(ts.cleanKeys)
-			ts.cleanKeys = ts.cleanKeys[:0]
-			ts.cleanLock.Unlock()
 		}
 	}
 }
 
-// Put a function 'f' awaiting to be executed at 'deadline'
-func (ts *TimedSched) Put(fnvkey uint32, mode int, f func(), delayMs uint32) {
+func (ts *TimedSched) put(fnvkey uint32, mode int, f func(), delayMs, expireMs uint32) {
 	ts.prependLock.Lock()
 	ts.prependTasks[ts.prependIdx] = append(ts.prependTasks[ts.prependIdx], timedFunc{
 		fnvKey:   fnvkey,
@@ -213,15 +199,12 @@ func (ts *TimedSched) Put(fnvkey uint32, mode int, f func(), delayMs uint32) {
 	}
 }
 
-func (ts *TimedSched) Release(fnvKey uint32) {
-	ts.cleanLock.Lock()
-	ts.cleanKeys = append(ts.cleanKeys, fnvKey)
-	ts.cleanLock.Unlock()
+func (ts *TimedSched) Put(fnvkey uint32, mode int, f func(), delayMs uint32) {
+	ts.put(fnvkey, mode, f, delayMs, currentMs()+delayMs)
+}
 
-	select {
-	case ts.chCleanNotify <- struct{}{}:
-	default:
-	}
+func (ts *TimedSched) Release(fnvKey uint32) {
+	ts.put(fnvKey, TS_REMOVE, nil, 0, 0)
 }
 
 type TimedSchedPool struct {
