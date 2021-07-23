@@ -2,6 +2,7 @@ package kcp
 
 import (
 	"container/heap"
+	"fmt"
 	"runtime"
 	"sync"
 	"time"
@@ -111,7 +112,6 @@ func (ts *TimedSched) newTasks(tasks []timedFunc) (bool, uint32) {
 		}
 		if task.delayMs == 0 || current >= task.expireMs {
 			task.execute()
-			current = currentMs()
 			continue
 		}
 		heap.Push(&ts.taskHeap, &task)
@@ -189,7 +189,7 @@ func (ts *TimedSched) put(fnvkey uint32, mode int, f func(), delayMs, expireMs u
 		mode:     mode,
 		execute:  f,
 		delayMs:  delayMs,
-		expireMs: currentMs() + delayMs,
+		expireMs: expireMs,
 	})
 	ts.prependLock.Unlock()
 
@@ -199,8 +199,15 @@ func (ts *TimedSched) put(fnvkey uint32, mode int, f func(), delayMs, expireMs u
 	}
 }
 
-func (ts *TimedSched) Put(fnvkey uint32, mode int, f func(), delayMs uint32) {
-	ts.put(fnvkey, mode, f, delayMs, currentMs()+delayMs)
+func (ts *TimedSched) Run(f func(), delayMs uint32) {
+	ts.put(0, TS_NORMAL, f, delayMs, currentMs()+delayMs)
+}
+
+func (ts *TimedSched) Trace(fnvKey uint32, mode int, f func(), delayMs uint32) {
+	if mode != TS_EXCLUSIVE && mode != TS_ONCE {
+		panic(fmt.Sprintf("invalid mode:%v", mode))
+	}
+	ts.put(fnvKey, mode, f, delayMs, currentMs()+delayMs)
 }
 
 func (ts *TimedSched) Release(fnvKey uint32) {

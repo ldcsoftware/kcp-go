@@ -544,7 +544,7 @@ func (s *UDPStream) Close() error {
 
 	s.WriteFlag(RST, nil)
 	close(s.chClose)
-	s.sched.Put(s.fnvKey, TS_NORMAL, s.clean, CleanWaitMs)
+	s.sched.Run(s.clean, CleanWaitMs)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -678,7 +678,7 @@ func (s *UDPStream) clean() {
 	s.mu.Lock()
 	s.state = StateCleaned
 	s.mu.Unlock()
-	s.sched.Put(s.fnvKey, TS_NORMAL, s.release, ReleaseWaitMs)
+	s.sched.Run(s.release, ReleaseWaitMs)
 }
 
 func (s *UDPStream) release() {
@@ -701,7 +701,7 @@ func (s *UDPStream) heartbeat() {
 
 	Logf(DEBUG, "UDPStream::heartbeat uuid:%v accepted:%v", s.uuid, s.accepted)
 	s.WriteFlag(HRT, nil)
-	s.sched.Put(s.fnvKey, TS_NORMAL, s.heartbeat, HeartbeatIntervalMs)
+	s.sched.Run(s.heartbeat, HeartbeatIntervalMs)
 }
 
 // flush sends data in txqueue if there is any
@@ -730,7 +730,7 @@ func (s *UDPStream) flush() {
 		}
 
 		if interval != 0 {
-			s.sched.Put(s.fnvKey, TS_EXCLUSIVE, s.flush, interval)
+			s.sched.Trace(s.fnvKey, TS_EXCLUSIVE, s.flush, interval)
 		}
 		return
 	}
@@ -753,7 +753,7 @@ func (s *UDPStream) flush() {
 	}
 
 	if interval != 0 {
-		s.sched.Put(s.fnvKey, TS_EXCLUSIVE, s.flush, interval)
+		s.sched.Trace(s.fnvKey, TS_EXCLUSIVE, s.flush, interval)
 	}
 }
 
@@ -893,7 +893,7 @@ func (s *UDPStream) notifyFlushEvent(immediately bool) {
 		tsMode = TS_EXCLUSIVE
 		delayMs = 0
 	}
-	s.sched.Put(s.fnvKey, tsMode, s.flush, delayMs)
+	s.sched.Trace(s.fnvKey, tsMode, s.flush, delayMs)
 }
 
 func (s *UDPStream) cmdRead(flag byte, data []byte, b []byte) (n int, err error) {
