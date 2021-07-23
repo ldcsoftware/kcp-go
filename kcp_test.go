@@ -999,6 +999,7 @@ func TestGetParallel(t *testing.T) {
 		tunnels:    make([]*UDPTunnel, tunnelCnt),
 		remotes:    make([]*net.UDPAddr, tunnelCnt),
 		headerSize: gouuid.Size + 1,
+		kcp:        NewKCP(1, func(buf []byte, size int, current, xmitMax, delayts uint32) {}),
 	}
 	assert.Equal(t, 3, len(s.tunnels))
 
@@ -1009,6 +1010,7 @@ func TestGetParallel(t *testing.T) {
 	s.SetParallelDelayMs(delayMs)
 	s.SetParallelDurationMs(durationMs)
 	s.SetParallelIntervalMs(intervalMs)
+	s.kcp.snd_una = 1
 
 	current := currentMs()
 
@@ -1056,6 +1058,7 @@ func TestParallelOutput(t *testing.T) {
 		tunnels:    make([]*UDPTunnel, tunnelCnt),
 		remotes:    make([]*net.UDPAddr, tunnelCnt),
 		headerSize: gouuid.Size + 1,
+		kcp:        NewKCP(1, func(buf []byte, size int, current, xmitMax, delayts uint32) {}),
 	}
 	assert.Equal(t, 3, len(s.tunnels))
 
@@ -1084,7 +1087,7 @@ func TestParallelOutput(t *testing.T) {
 	assert.False(t, par)
 	assert.True(t, replica)
 
-	s.state = StateEstablish
+	s.kcp.snd_una = 1
 
 	s.output(buf, current, 0, 0)
 	assert.Equal(t, 3, len(s.msgss))
@@ -1134,6 +1137,7 @@ func TestParallelOutput(t *testing.T) {
 		tunnels:    make([]*UDPTunnel, tunnelCnt),
 		remotes:    make([]*net.UDPAddr, tunnelCnt),
 		headerSize: gouuid.Size,
+		kcp:        NewKCP(1, func(buf []byte, size int, current, xmitMax, delayts uint32) {}),
 	}
 
 	s.SetParallelDelayMs(delayMs)

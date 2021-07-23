@@ -3,7 +3,6 @@ package kcp
 import (
 	"container/heap"
 	"fmt"
-	"runtime"
 	"sync"
 	"time"
 )
@@ -14,9 +13,6 @@ const (
 	TS_EXCLUSIVE
 	TS_REMOVE
 )
-
-// SystemTimedSched is the library level timed-scheduler
-var SystemTimedSched *TimedSchedPool = NewTimedSchedPool(runtime.NumCPU())
 
 type timedFunc struct {
 	fnvKey   uint32

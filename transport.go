@@ -3,6 +3,7 @@ package kcp
 import (
 	"io"
 	"net"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -52,6 +53,7 @@ type TunnelSelector interface {
 }
 
 type TransportOption struct {
+	SchedParallel   int
 	AcceptBacklog   int
 	DialTimeout     time.Duration
 	InputQueue      int
@@ -60,6 +62,9 @@ type TransportOption struct {
 }
 
 func (opt *TransportOption) SetDefault() *TransportOption {
+	if opt.SchedParallel == 0 {
+		opt.SchedParallel = runtime.NumCPU()
+	}
 	if opt.AcceptBacklog == 0 {
 		opt.AcceptBacklog = DefaultAcceptBacklog
 	}
@@ -114,6 +119,7 @@ type inputTest struct {
 
 type UDPTransport struct {
 	*TransportOption
+	schedPool     *TimedSchedPool
 	streamm       ConcurrentMap
 	startAccept   int32
 	preAcceptChan chan chan *UDPStream
@@ -132,6 +138,7 @@ func NewUDPTransport(sel TunnelSelector, opt *TransportOption) (t *UDPTransport,
 	opt.SetDefault()
 	t = &UDPTransport{
 		TransportOption: opt,
+		schedPool:       NewTimedSchedPool(opt.SchedParallel),
 		streamm:         NewConcurrentMap(),
 		preAcceptChan:   make(chan chan *UDPStream, opt.AcceptBacklog),
 		tunnelHostM:     make(map[string]*UDPTunnel),
@@ -185,7 +192,7 @@ func (t *UDPTransport) NewTunnel(lAddr string) (tunnel *UDPTunnel, err error) {
 func (t *UDPTransport) NewStream(uuid gouuid.UUID, accepted bool, remotes []string) (stream *UDPStream, err error) {
 	Logf(INFO, "UDPTransport::NewStream uuid:%v accepted:%v remotes:%v", uuid, accepted, remotes)
 
-	stream, err = NewUDPStream(uuid, accepted, remotes, t.sel, func(uuid gouuid.UUID) {
+	stream, err = NewUDPStream(uuid, accepted, remotes, t.schedPool, t.sel, func(uuid gouuid.UUID) {
 		t.handleClose(uuid)
 	})
 	if err != nil {

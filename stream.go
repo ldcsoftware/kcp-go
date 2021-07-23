@@ -129,7 +129,7 @@ type (
 )
 
 // newUDPSession create a new udp session for client or server
-func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, sel TunnelSelector, releaseF releaseCallback) (stream *UDPStream, err error) {
+func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, schedPool *TimedSchedPool, sel TunnelSelector, releaseF releaseCallback) (stream *UDPStream, err error) {
 	tunnels := sel.Pick(remotes)
 	if len(tunnels) == 0 || len(tunnels) != len(remotes) {
 		return nil, errTunnelPick
@@ -165,7 +165,7 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, sel TunnelS
 	stream.fnvKey = fnv32(uuid)
 	stream.sel = sel
 	stream.releaseF = releaseF
-	stream.sched = SystemTimedSched.Pick(stream.fnvKey)
+	stream.sched = schedPool.Pick(stream.fnvKey)
 	if uuid.Version() == gouuid.V1 {
 		stream.headerSize = gouuid.Size
 	} else {
@@ -372,6 +372,7 @@ func (s *UDPStream) Read(b []byte) (n int, err error) {
 				if n == len(b) {
 					s.notifyFlushEvent(s.kcp.probe_ask_tell())
 					s.mu.Unlock()
+					// Logf(DEBUG, "UDPStream::read finish uuid:%v accepted:%v len:%v", s.uuid, s.accepted, n)
 					return n, nil
 				}
 			}
@@ -395,11 +396,13 @@ func (s *UDPStream) Read(b []byte) (n int, err error) {
 				if n == len(b) || err != nil {
 					s.notifyFlushEvent(s.kcp.probe_ask_tell())
 					s.mu.Unlock()
+					// Logf(DEBUG, "UDPStream::read finish uuid:%v accepted:%v len:%v", s.uuid, s.accepted, n)
 					return n, err
 				}
 			} else if n > 0 {
 				s.notifyFlushEvent(s.kcp.probe_ask_tell())
 				s.mu.Unlock()
+				// Logf(DEBUG, "UDPStream::read finish uuid:%v accepted:%v len:%v", s.uuid, s.accepted, n)
 				return n, nil
 			} else {
 				break
@@ -492,7 +495,7 @@ func (s *UDPStream) WriteBuffer(flag byte, b []byte, noBlock bool) (n int, err e
 			atomic.AddUint64(&DefaultSnmp.BytesSent, uint64(n))
 
 			// cost := time.Since(start)
-			// Logf(DEBUG, "UDPStream::Write finish uuid:%v accepted:%v randId:%v waitsnd:%v snd_wnd:%v rmt_wnd:%v snd_buf:%v snd_queue:%v cost:%v len:%v", s.uuid, s.accepted, randId, waitsnd, s.kcp.snd_wnd, s.kcp.rmt_wnd, len(s.kcp.snd_buf), len(s.kcp.snd_queue), cost, n)
+			// Logf(DEBUG, "UDPStream::Write finish uuid:%v accepted:%v flag:%v randId:%v waitsnd:%v snd_wnd:%v rmt_wnd:%v snd_buf:%v snd_queue:%v cost:%v len:%v", s.uuid, s.accepted, string(flag), randId, waitsnd, s.kcp.snd_wnd, s.kcp.rmt_wnd, len(s.kcp.snd_buf), len(s.kcp.snd_queue), cost, n)
 			return n, nil
 		} else if noBlock {
 			s.mu.Unlock()
@@ -856,7 +859,7 @@ func (s *UDPStream) input(data []byte) {
 	s.mu.Unlock()
 	s.notifyFlushEvent(immediately)
 
-	// Logf(DEBUG, "UDPStream::input uuid:%v accepted:%v len:%v rmtWnd:%v mmediately:%v", s.uuid, s.accepted, len(data), s.kcp.rmt_wnd, immediately)
+	// Logf(DEBUG, "UDPStream::input uuid:%v accepted:%v len:%v rmtWnd:%v mmediately:%v trigger:%v replica:%v", s.uuid, s.accepted, len(data), s.kcp.rmt_wnd, immediately, trigger, replica)
 
 	atomic.AddUint64(&DefaultSnmp.InPkts, 1)
 	atomic.AddUint64(&DefaultSnmp.InBytes, uint64(len(data)))
