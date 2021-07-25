@@ -17,7 +17,7 @@ var (
 )
 
 const (
-	DefaultMsgQueueCount = 10
+	DefaultMsgQueueCount = 1
 )
 
 type input_callback func(tunnel *UDPTunnel, data []byte, addr net.Addr)

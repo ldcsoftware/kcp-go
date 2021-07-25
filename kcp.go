@@ -892,7 +892,10 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 	// check for retransmissions
 	current = currentMs()
 	var change, lostSegs, fastRetransSegs, earlyRetransSegs uint64
-	minrto := int32(kcp.interval)
+	var minrto int32
+	if kcp.ts_probe > 0 && kcp.ts_probe > current {
+		minrto = int32(kcp.ts_probe - current)
+	}
 
 	ref := kcp.snd_buf[:len(kcp.snd_buf)] // for bounds check elimination
 	for k := range ref {
@@ -961,7 +964,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 		}
 
 		// get the nearest rto
-		if rto := _itimediff(segment.resendts, current); rto > 0 && rto < minrto {
+		if rto := _itimediff(segment.resendts, current); rto > 0 && (rto < minrto || minrto == 0) {
 			minrto = rto
 		}
 	}
@@ -1014,10 +1017,6 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 			kcp.cwnd = 1
 			kcp.incr = kcp.mss
 		}
-	}
-
-	if kcp.rmt_wnd != 0 && kcp.WaitSnd() == 0 {
-		return 0
 	}
 	return uint32(minrto)
 }
