@@ -5,7 +5,6 @@ import (
 	"io"
 	"net"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"golang.org/x/net/ipv4"
@@ -22,12 +21,6 @@ const (
 
 type input_callback func(tunnel *UDPTunnel, data []byte, addr net.Addr)
 
-type MsgQueue struct {
-	mu    sync.Mutex
-	msgss [2][]ipv4.Message
-	wIdx  int
-}
-
 type (
 	// UDPTunnel defines a session implemented by UDP
 	UDPTunnel struct {
@@ -42,10 +35,10 @@ type (
 		chFlush chan struct{} // notify Write
 
 		// packets waiting to be sent on wire
-		msgqs           []*MsgQueue
-		msgqIdx         int64
 		xconn           batchConn // for x/net
 		xconnWriteError error
+
+		broker *MsgBroker
 
 		//simulate
 		loss     int
@@ -55,7 +48,7 @@ type (
 )
 
 // newUDPSession create a new udp session for client or server
-func NewUDPTunnel(laddr string, inputcb input_callback) (tunnel *UDPTunnel, err error) {
+func NewUDPTunnel(laddr string, inputcb input_callback, broker *MsgBroker) (tunnel *UDPTunnel, err error) {
 	// network type detection
 	addr, err := net.ResolveUDPAddr("udp", laddr)
 	if err != nil {
@@ -75,12 +68,9 @@ func NewUDPTunnel(laddr string, inputcb input_callback) (tunnel *UDPTunnel, err 
 	tunnel.conn = conn
 	tunnel.inputcb = inputcb
 	tunnel.addr = addr
+	tunnel.chFlush = make(chan struct{})
 	tunnel.die = make(chan struct{})
-	tunnel.chFlush = make(chan struct{}, 1)
-	tunnel.msgqs = make([]*MsgQueue, DefaultMsgQueueCount)
-	for i := 0; i < len(tunnel.msgqs); i++ {
-		tunnel.msgqs[i] = &MsgQueue{}
-	}
+	tunnel.broker = broker
 
 	// cast to writebatch conn
 	if addr.IP.To4() != nil {
@@ -141,34 +131,15 @@ func (t *UDPTunnel) Simulate(loss float64, delayMin, delayMax int) {
 }
 
 func (t *UDPTunnel) pushMsgs(msgs []ipv4.Message) {
-	msgqIdx := atomic.AddInt64(&t.msgqIdx, 1)
-	msgq := t.msgqs[msgqIdx%int64(len(t.msgqs))]
-	msgq.mu.Lock()
-	msgq.msgss[msgq.wIdx] = append(msgq.msgss[msgq.wIdx], msgs...)
-	msgq.mu.Unlock()
-	t.notifyFlush()
+	t.broker.Push(msgs)
 }
 
-func (t *UDPTunnel) popMsgss(msgss *[][]ipv4.Message) {
-	for _, msgq := range t.msgqs {
-		msgq.mu.Lock()
-		msgs := msgq.msgss[msgq.wIdx]
-		msgq.wIdx = (msgq.wIdx + 1) % 2
-		msgq.msgss[msgq.wIdx] = msgq.msgss[msgq.wIdx][:0]
-		msgq.mu.Unlock()
-		if len(msgs) != 0 {
-			*msgss = append(*msgss, msgs)
-		}
-	}
+func (t *UDPTunnel) popMsgs(msgs *[]ipv4.Message) {
+	t.broker.Acquire(msgs)
 }
 
-func (t *UDPTunnel) releaseMsgss(msgss [][]ipv4.Message) {
-	for _, msgs := range msgss {
-		for k := range msgs {
-			xmitBuf.Put(msgs[k].Buffers[0])
-			msgs[k].Buffers = nil
-		}
-	}
+func (t *UDPTunnel) releaseMsgs(msgs []ipv4.Message) {
+	t.broker.Release(msgs)
 }
 
 func (t *UDPTunnel) output(msgs []ipv4.Message) (err error) {

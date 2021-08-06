@@ -347,11 +347,6 @@ func main() {
 			Usage: "dial timeout",
 		},
 		cli.IntFlag{
-			Name:  "parallelXmit",
-			Value: 4,
-			Usage: "parallel xmit",
-		},
-		cli.IntFlag{
 			Name:  "testStreamCount",
 			Value: 0,
 			Usage: "test stream count",
@@ -417,7 +412,6 @@ func main() {
 		tunnelProcessorCount := c.Int("tunnelProcessorCount")
 		noResend := c.Int("noResend")
 		timeout := c.Int("timeout")
-		parallelXmit := c.Int("parallelXmit")
 		testStreamCount := c.Int("testStreamCount")
 		testMsgCount := c.Int("testMsgCount")
 		testMsgLen := c.Int("testMsgLen")
@@ -449,7 +443,6 @@ func main() {
 		fmt.Printf("Action tunnelProcessorCount:%v\n", tunnelProcessorCount)
 		fmt.Printf("Action noResend:%v\n", noResend)
 		fmt.Printf("Action timeout:%v\n", timeout)
-		fmt.Printf("Action parallelXmit:%v\n", parallelXmit)
 		fmt.Printf("Action testStreamCount:%v\n", testStreamCount)
 		fmt.Printf("Action testMsgCount:%v\n", testMsgCount)
 		fmt.Printf("Action testMsgLen:%v\n", testMsgLen)
@@ -519,7 +512,6 @@ func main() {
 			}
 			stream.SetWindowSize(wndSize, wndSize*2)
 			stream.SetNoDelay(kcp.FastStreamOption.Nodelay, interval, kcp.FastStreamOption.Resend, kcp.FastStreamOption.Nc)
-			stream.SetParallelXmit(uint32(parallelXmit))
 
 			kcp.Logf(kcp.WARN, "Open UDPStream. uuid:%v cost:%v", stream.GetUUID(), time.Since(start))
 			return stream, nil

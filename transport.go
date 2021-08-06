@@ -129,6 +129,7 @@ type UDPTransport struct {
 	dieOnce       sync.Once
 	inputQueues   []chan *inputMsg
 	makeUUID      func() (gouuid.UUID, error)
+	broker        *MsgBroker
 }
 
 func NewUDPTransport(sel TunnelSelector, opt *TransportOption) (t *UDPTransport, err error) {
@@ -146,6 +147,7 @@ func NewUDPTransport(sel TunnelSelector, opt *TransportOption) (t *UDPTransport,
 		die:             make(chan struct{}),
 		inputQueues:     make([]chan *inputMsg, 0),
 		makeUUID:        gouuid.NewV4,
+		broker:          NewMsgBroker(0, 0),
 	}
 	return t, nil
 }
@@ -177,7 +179,7 @@ func (t *UDPTransport) NewTunnel(lAddr string) (tunnel *UDPTunnel, err error) {
 			}
 		}
 		t.inputQueues[inputPoll%t.TunnelProcessor+tunnelIdx] <- msg
-	})
+	}, t.broker)
 
 	if err != nil {
 		Logf(ERROR, "UDPTransport::NewTunnel lAddr:%v err:%v", lAddr, err)

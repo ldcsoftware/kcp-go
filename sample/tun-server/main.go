@@ -496,11 +496,6 @@ func main() {
 			Value: 0,
 			Usage: "kcp noResend",
 		},
-		cli.IntFlag{
-			Name:  "parallelXmit",
-			Value: 4,
-			Usage: "parallel xmit",
-		},
 	}
 	myApp.Action = func(c *cli.Context) error {
 		testType := DefaultTest
@@ -536,7 +531,6 @@ func main() {
 		inputQueueCount := c.Int("inputQueueCount")
 		tunnelProcessorCount := c.Int("tunnelProcessorCount")
 		noResend := c.Int("noResend")
-		parallelXmit := c.Int("parallelXmit")
 
 		fmt.Printf("Action cmdAddr:%v\n", cmdAddr)
 		fmt.Printf("Action targetAddr:%v\n", targetAddr)
@@ -554,7 +548,6 @@ func main() {
 		fmt.Printf("Action inputQueueCount:%v\n", inputQueueCount)
 		fmt.Printf("Action tunnelProcessorCount:%v\n", tunnelProcessorCount)
 		fmt.Printf("Action noResend:%v\n", noResend)
-		fmt.Printf("Action parallelXmit:%v\n", parallelXmit)
 
 		kcp.Logf = func(lvl kcp.LogLevel, f string, args ...interface{}) {
 			if int(lvl) >= logLevel {
@@ -656,7 +649,6 @@ func main() {
 			checkError(err)
 			stream.SetWindowSize(wndSize, wndSize*2)
 			stream.SetNoDelay(kcp.FastStreamOption.Nodelay, interval, kcp.FastStreamOption.Resend, kcp.FastStreamOption.Nc)
-			stream.SetParallelXmit(uint32(parallelXmit))
 			go func() {
 				switch testType {
 				case DefaultTest:

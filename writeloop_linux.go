@@ -3,6 +3,7 @@
 package kcp
 
 import (
+	"runtime"
 	"net"
 	"os"
 	"sync/atomic"
@@ -50,19 +51,22 @@ func (t *UDPTunnel) writeLoop() {
 		return
 	}
 
-	var msgss [][]ipv4.Message
+	var msgs []ipv4.Message
 	for {
 		select {
 		case <-t.die:
 			return
-		case <-t.chFlush:
+		default:
 		}
 
-		t.popMsgss(&msgss)
-		for _, msgs := range msgss {
-			t.writeBatch(msgs)
+		t.popMsgs(&msgs)
+		t.writeBatch(msgs)
+		t.releaseMsgs(msgs)
+
+		if len(msgs) == 0 {
+			runtime.Gosched()
+		} else {
+			msgs = msgs[:0]
 		}
-		t.releaseMsgss(msgss)
-		msgss = msgss[:0]
 	}
 }
