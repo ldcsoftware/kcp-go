@@ -656,7 +656,6 @@ func main() {
 			checkError(err)
 			stream.SetWindowSize(wndSize, wndSize*2)
 			stream.SetNoDelay(kcp.FastStreamOption.Nodelay, interval, kcp.FastStreamOption.Resend, kcp.FastStreamOption.Nc)
-			stream.SetParallelXmit(uint32(parallelXmit))
 			go func() {
 				switch testType {
 				case DefaultTest:
