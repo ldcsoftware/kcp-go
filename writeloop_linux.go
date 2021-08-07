@@ -59,14 +59,9 @@ func (t *UDPTunnel) writeLoop() {
 		default:
 		}
 
-		t.popMsgs(&msgs)
+		queue := t.broker.Acquire(&msgs)
 		t.writeBatch(msgs)
-		t.releaseMsgs(msgs)
-
-		if len(msgs) == 0 {
-			runtime.Gosched()
-		} else {
-			msgs = msgs[:0]
-		}
+		t.broker.Release(queue, msgs)
+		msgs = msgs[:0]
 	}
 }

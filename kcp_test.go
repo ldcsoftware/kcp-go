@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1553,42 +1554,6 @@ func BenchmarkFlush(b *testing.B) {
 	}
 }
 
-func BenchmarkMsgPushAndPop(b *testing.B) {
-	tunnel, _ := NewUDPTunnel("127.0.0.1:0", nil)
-	tunnel.Close()
-
-	streamCount := 100
-
-	msgss := make([][]ipv4.Message, streamCount)
-	for i := 0; i < streamCount; i++ {
-		msgCount := rand.Intn(5) + 1
-		addr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:"+strconv.Itoa(rand.Intn(10)+1))
-		msgs := make([]ipv4.Message, 0)
-		for j := 0; j < msgCount; j++ {
-			msgs = append(msgs, ipv4.Message{Addr: addr})
-		}
-		msgss[i] = msgs
-	}
-
-	b.ResetTimer()
-	b.ReportAllocs()
-
-	var msgssR [][]ipv4.Message
-	for n := 0; n < b.N; n++ {
-		wg := sync.WaitGroup{}
-		wg.Add(streamCount)
-		for i := 0; i < streamCount; i++ {
-			go func(idx int) {
-				defer wg.Done()
-				tunnel.pushMsgs(msgss[idx])
-			}(i)
-		}
-		wg.Wait()
-		tunnel.popMsgss(&msgssR)
-		msgssR = msgssR[:0]
-	}
-}
-
 func BenchmarkEchoSpeed128B(b *testing.B) {
 	InitLog(FATAL)
 	echoSpeed(b, 128)
@@ -1634,4 +1599,50 @@ func TestUpdateAck(t *testing.T) {
 		kcp.update_ack(rtt)
 		fmt.Println("rtt", rtt, ",", "rto", kcp.rx_rto)
 	}
+}
+
+func TestMsgBroker(t *testing.T) {
+	InitLog(FATAL)
+	broker := NewMsgBroker(0, 0)
+
+	pushConcurrency := 20
+	msgCounts := 10000
+	pushMsgCount := int64(0)
+
+	for i := 0; i < pushConcurrency; i++ {
+		go func() {
+			for j := 0; j < msgCounts; j++ {
+				broker.Push([]ipv4.Message{ipv4.Message{
+					Buffers: [][]byte{xmitBuf.Get().([]byte)[:]},
+				}})
+				atomic.AddInt64(&pushMsgCount, 1)
+				time.Sleep(time.Millisecond * 1)
+			}
+		}()
+	}
+
+	popMsgCount := int64(0)
+	popConcurrency := 10
+	for i := 0; i < popConcurrency; i++ {
+		go func() {
+			var msgs []ipv4.Message
+			for {
+				queue := broker.Acquire(&msgs)
+				time.Sleep(time.Millisecond * 10)
+				broker.Release(queue, msgs)
+
+				atomic.AddInt64(&popMsgCount, int64(len(msgs)))
+				msgs = msgs[:0]
+			}
+		}()
+	}
+
+	for atomic.LoadInt64(&popMsgCount) != int64(pushConcurrency*msgCounts) {
+		fmt.Println("push count", atomic.LoadInt64(&pushMsgCount))
+		fmt.Println("pop count", atomic.LoadInt64(&popMsgCount))
+		time.Sleep(time.Second)
+	}
+
+	fmt.Println("push count", atomic.LoadInt64(&pushMsgCount))
+	fmt.Println("pop count", atomic.LoadInt64(&popMsgCount))
 }

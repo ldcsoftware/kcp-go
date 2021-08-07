@@ -31,10 +31,9 @@ func (t *UDPTunnel) defaultWriteLoop() {
 		default:
 		}
 
-		t.popMsgs(&msgs)
+		queue := t.broker.Acquire(&msgs)
 		t.writeSingle(msgs)
-		t.releaseMsgs(msgs)
-
+		t.broker.Release(queue, msgs)
 		msgs = msgs[:0]
 	}
 }

@@ -130,18 +130,6 @@ func (t *UDPTunnel) Simulate(loss float64, delayMin, delayMax int) {
 	t.delayMax = delayMax
 }
 
-func (t *UDPTunnel) pushMsgs(msgs []ipv4.Message) {
-	t.broker.Push(msgs)
-}
-
-func (t *UDPTunnel) popMsgs(msgs *[]ipv4.Message) {
-	t.broker.Acquire(msgs)
-}
-
-func (t *UDPTunnel) releaseMsgs(msgs []ipv4.Message) {
-	t.broker.Release(msgs)
-}
-
 func (t *UDPTunnel) output(msgs []ipv4.Message) (err error) {
 	if len(msgs) == 0 {
 		return errInvalidOperation
@@ -154,7 +142,7 @@ func (t *UDPTunnel) output(msgs []ipv4.Message) (err error) {
 	}
 
 	if t.loss == 0 && t.delayMin == 0 && t.delayMax == 0 {
-		t.pushMsgs(msgs)
+		t.broker.Push(msgs)
 		return
 	}
 
@@ -166,7 +154,7 @@ func (t *UDPTunnel) output(msgs []ipv4.Message) (err error) {
 	}
 
 	if t.delayMin == 0 && t.delayMax == 0 && len(succMsgs) != 0 {
-		t.pushMsgs(succMsgs)
+		t.broker.Push(succMsgs)
 		return
 	}
 
