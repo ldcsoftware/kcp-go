@@ -36,6 +36,8 @@ type Snmp struct {
 	Parallels        uint64   // parallel count
 	RtoMax           uint64   // rto max
 	AckCostMax       uint64   // ack cost max
+	WriteCount       uint64   //write count
+	ReadCount        uint64   // read count
 	XmitIntervalMax  []uint64 // xmit interval max
 }
 
@@ -72,6 +74,8 @@ func (s *Snmp) Header() []string {
 		"Parallels",
 		"RtoMax",
 		"AckCostMax",
+		"WriteCount",
+		"ReadCount",
 	}
 	headers = append(headers, sliceHeaders1("XmitIntervalMax", s.XmitIntervalMax)...)
 	return headers
@@ -105,6 +109,8 @@ func (s *Snmp) ToSlice() []string {
 		fmt.Sprint(snmp.Parallels),
 		fmt.Sprint(snmp.RtoMax),
 		fmt.Sprint(snmp.AckCostMax),
+		fmt.Sprint(snmp.WriteCount),
+		fmt.Sprint(snmp.ReadCount),
 	}
 	vs = append(vs, sliceValues1(snmp.XmitIntervalMax)...)
 	return vs
@@ -137,6 +143,8 @@ func (s *Snmp) Copy() *Snmp {
 	d.Parallels = atomic.LoadUint64(&s.Parallels)
 	d.RtoMax = atomic.LoadUint64(&s.RtoMax)
 	d.AckCostMax = atomic.LoadUint64(&s.AckCostMax)
+	d.WriteCount = atomic.LoadUint64(&s.WriteCount)
+	d.ReadCount = atomic.LoadUint64(&s.ReadCount)
 	sliceCopy1(d.XmitIntervalMax, s.XmitIntervalMax)
 	return d
 }
@@ -167,6 +175,8 @@ func (s *Snmp) Reset() {
 	atomic.StoreUint64(&s.Parallels, 0)
 	atomic.StoreUint64(&s.RtoMax, 0)
 	atomic.StoreUint64(&s.AckCostMax, 0)
+	atomic.StoreUint64(&s.WriteCount, 0)
+	atomic.StoreUint64(&s.ReadCount, 0)
 	sliceReset1(s.XmitIntervalMax)
 }
 
