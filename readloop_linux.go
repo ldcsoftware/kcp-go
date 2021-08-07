@@ -56,5 +56,6 @@ func (t *UDPTunnel) readLoop() {
 			}
 			t.notifyReadError(err)
 		}
+		atomic.AddUint64(&DefaultSnmp.ReadCount, uint64(1))
 	}
 }

@@ -39,6 +39,7 @@ func (t *UDPTunnel) writeBatch(msgs []ipv4.Message) {
 		}
 	}
 
+	atomic.AddUint64(&DefaultSnmp.WriteCount, uint64(1))
 	atomic.AddUint64(&DefaultSnmp.OutPkts, uint64(npkts))
 	atomic.AddUint64(&DefaultSnmp.OutBytes, uint64(nbytes))
 }
