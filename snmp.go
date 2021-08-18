@@ -34,6 +34,7 @@ type Snmp struct {
 	LostSegs         uint64   // number of segs infered as lost
 	RepeatSegs       uint64   // number of segs duplicated
 	Parallels        uint64   // parallel count
+	ParallelStatuss  uint64   // parall status count
 	RtoMax           uint64   // rto max
 	AckCostMax       uint64   // ack cost max
 	XmitIntervalMax  []uint64 // xmit interval max
@@ -70,6 +71,7 @@ func (s *Snmp) Header() []string {
 		"LostSegs",
 		"RepeatSegs",
 		"Parallels",
+		"ParallelStatuss",
 		"RtoMax",
 		"AckCostMax",
 	}
@@ -103,6 +105,7 @@ func (s *Snmp) ToSlice() []string {
 		fmt.Sprint(snmp.LostSegs),
 		fmt.Sprint(snmp.RepeatSegs),
 		fmt.Sprint(snmp.Parallels),
+		fmt.Sprint(snmp.ParallelStatuss),
 		fmt.Sprint(snmp.RtoMax),
 		fmt.Sprint(snmp.AckCostMax),
 	}
@@ -135,6 +138,7 @@ func (s *Snmp) Copy() *Snmp {
 	d.LostSegs = atomic.LoadUint64(&s.LostSegs)
 	d.RepeatSegs = atomic.LoadUint64(&s.RepeatSegs)
 	d.Parallels = atomic.LoadUint64(&s.Parallels)
+	d.ParallelStatuss = atomic.LoadUint64(&s.ParallelStatuss)
 	d.RtoMax = atomic.LoadUint64(&s.RtoMax)
 	d.AckCostMax = atomic.LoadUint64(&s.AckCostMax)
 	sliceCopy1(d.XmitIntervalMax, s.XmitIntervalMax)
@@ -165,6 +169,7 @@ func (s *Snmp) Reset() {
 	atomic.StoreUint64(&s.LostSegs, 0)
 	atomic.StoreUint64(&s.RepeatSegs, 0)
 	atomic.StoreUint64(&s.Parallels, 0)
+	atomic.StoreUint64(&s.ParallelStatuss, 0)
 	atomic.StoreUint64(&s.RtoMax, 0)
 	atomic.StoreUint64(&s.AckCostMax, 0)
 	sliceReset1(s.XmitIntervalMax)

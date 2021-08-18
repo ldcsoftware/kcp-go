@@ -121,6 +121,7 @@ type (
 		parallelDurationMs  uint32
 		parallelExpireMs    uint32
 		parallelDelaytsMax  uint32
+		parallelStatus      bool
 		primaryReceived     bool // received primary data by target
 		primaryReceivedTell bool // received primary data from target
 
@@ -687,6 +688,10 @@ func (s *UDPStream) update() {
 			Logf(INFO, "UDPStream::clean uuid:%v accepted:%v", s.uuid, s.accepted)
 			s.mu.Lock()
 			s.kcp.ReleaseTX()
+			if s.parallelStatus {
+				s.parallelStatus = false
+				atomic.AddUint64(&DefaultSnmp.ParallelStatuss, ^uint64(0))
+			}
 			s.mu.Unlock()
 			if flushTimer != nil {
 				flushTimer.Stop()
@@ -806,6 +811,14 @@ func (s *UDPStream) output(buf []byte, current, xmitMax, delayts uint32) {
 	appendCount, trigger := s.getParallel(current, xmitMax, delayts)
 	for i := len(s.msgss); i < appendCount; i++ {
 		s.msgss = append(s.msgss, make([]ipv4.Message, 0))
+	}
+
+	if appendCount > 1 && !s.parallelStatus {
+		s.parallelStatus = true
+		atomic.AddUint64(&DefaultSnmp.ParallelStatuss, 1)
+	} else if appendCount == 1 && s.parallelStatus {
+		s.parallelStatus = false
+		atomic.AddUint64(&DefaultSnmp.ParallelStatuss, ^uint64(0))
 	}
 
 	// Logf(DEBUG, "UDPStream::output uuid:%v accepted:%v len:%v xmitMax:%v delayts:%v appendCount:%v",
