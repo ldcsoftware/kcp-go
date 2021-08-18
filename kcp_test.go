@@ -1035,18 +1035,7 @@ func TestGetParallel(t *testing.T) {
 	assert.False(t, trigger)
 
 	s.primaryReceived = true
-
-	parallel, trigger = s.getParallel(current, 0, 350)
-	assert.Equal(t, 3, parallel)
-	assert.False(t, trigger)
-
 	s.primaryReceivedTell = true
-
-	parallel, trigger = s.getParallel(current, 0, 150)
-	assert.Equal(t, 3, parallel)
-	assert.False(t, trigger)
-
-	current += durationMs
 
 	parallel, trigger = s.getParallel(current, 0, 150)
 	assert.Equal(t, 1, parallel)
@@ -1073,6 +1062,13 @@ func TestGetParallel(t *testing.T) {
 	assert.False(t, trigger)
 
 	current += durationMs
+
+	parallel, trigger = s.getParallel(current, 0, 150)
+	assert.Equal(t, 3, parallel)
+	assert.False(t, trigger)
+
+	s.primaryReceived = true
+	s.primaryReceivedTell = true
 
 	parallel, trigger = s.getParallel(current, 0, 150)
 	assert.Equal(t, 1, parallel)
@@ -1103,17 +1099,16 @@ func TestParallelOutput(t *testing.T) {
 
 	buf := make([]byte, 100)
 	s.output(buf, current, 0, 0)
-	assert.Equal(t, 3, len(s.msgss))
+	assert.Equal(t, 2, len(s.msgss))
 	assert.Equal(t, 1, len(s.msgss[0]))
 	assert.Equal(t, 1, len(s.msgss[1]))
-	assert.Equal(t, 1, len(s.msgss[2]))
 
 	par, replica, primaryReceived := s.decodeFrameHeader(s.msgss[0][0].Buffers[0])
 	assert.False(t, par)
 	assert.False(t, replica)
 	assert.False(t, primaryReceived)
 
-	par, replica, primaryReceived = s.decodeFrameHeader(s.msgss[2][0].Buffers[0])
+	par, replica, primaryReceived = s.decodeFrameHeader(s.msgss[1][0].Buffers[0])
 	assert.False(t, par)
 	assert.True(t, replica)
 	assert.False(t, primaryReceived)
@@ -1122,21 +1117,20 @@ func TestParallelOutput(t *testing.T) {
 	s.primaryReceivedTell = true
 
 	s.output(buf, current, 0, 0)
-	assert.Equal(t, 3, len(s.msgss))
+	assert.Equal(t, 2, len(s.msgss))
 	assert.Equal(t, 2, len(s.msgss[0]))
 	assert.Equal(t, 1, len(s.msgss[1]))
-	assert.Equal(t, 1, len(s.msgss[2]))
 
 	par, replica, primaryReceived = s.decodeFrameHeader(s.msgss[0][1].Buffers[0])
 	assert.False(t, par)
 	assert.False(t, replica)
-	assert.False(t, primaryReceived)
+	assert.True(t, primaryReceived)
 
 	s.output(buf, current, 0, 200)
 
+	assert.Equal(t, 2, len(s.msgss))
 	assert.Equal(t, 3, len(s.msgss[0]))
 	assert.Equal(t, 2, len(s.msgss[1]))
-	assert.Equal(t, 1, len(s.msgss[2]))
 
 	par, replica, primaryReceived = s.decodeFrameHeader(s.msgss[0][2].Buffers[0])
 	assert.True(t, par)
@@ -1149,26 +1143,25 @@ func TestParallelOutput(t *testing.T) {
 	assert.False(t, primaryReceived)
 
 	s.output(buf, current, 0, 350)
+	assert.Equal(t, 3, len(s.msgss))
 	assert.Equal(t, 4, len(s.msgss[0]))
 	assert.Equal(t, 3, len(s.msgss[1]))
-	assert.Equal(t, 2, len(s.msgss[2]))
-
-	s.primaryReceivedTell = true
+	assert.Equal(t, 1, len(s.msgss[2]))
 
 	s.output(buf, current, 0, 500)
 	assert.Equal(t, 5, len(s.msgss[0]))
 	assert.Equal(t, 4, len(s.msgss[1]))
-	assert.Equal(t, 3, len(s.msgss[2]))
+	assert.Equal(t, 2, len(s.msgss[2]))
 
 	par, replica, primaryReceived = s.decodeFrameHeader(s.msgss[0][4].Buffers[0])
 	assert.False(t, par)
 	assert.False(t, replica)
-	assert.True(t, primaryReceived)
+	assert.False(t, primaryReceived)
 
-	par, replica, primaryReceived = s.decodeFrameHeader(s.msgss[2][2].Buffers[0])
+	par, replica, primaryReceived = s.decodeFrameHeader(s.msgss[2][1].Buffers[0])
 	assert.False(t, par)
 	assert.True(t, replica)
-	assert.True(t, primaryReceived)
+	assert.False(t, primaryReceived)
 
 	uuid, _ = gouuid.NewV1()
 	s = &UDPStream{
@@ -1185,17 +1178,16 @@ func TestParallelOutput(t *testing.T) {
 
 	buf = make([]byte, 100)
 	s.output(buf, current, 0, 0)
-	assert.Equal(t, 3, len(s.msgss))
+	assert.Equal(t, 2, len(s.msgss))
 	assert.Equal(t, 1, len(s.msgss[0]))
 	assert.Equal(t, 1, len(s.msgss[1]))
-	assert.Equal(t, 1, len(s.msgss[2]))
 
 	par, replica, primaryReceived = s.decodeFrameHeader(s.msgss[0][0].Buffers[0])
 	assert.False(t, par)
 	assert.False(t, replica)
 	assert.False(t, primaryReceived)
 
-	par, replica, primaryReceived = s.decodeFrameHeader(s.msgss[2][0].Buffers[0])
+	par, replica, primaryReceived = s.decodeFrameHeader(s.msgss[1][0].Buffers[0])
 	assert.False(t, par)
 	assert.False(t, replica)
 	assert.False(t, primaryReceived)

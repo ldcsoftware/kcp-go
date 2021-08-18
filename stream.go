@@ -783,10 +783,10 @@ func (s *UDPStream) tryParallel(current uint32) bool {
 }
 
 func (s *UDPStream) getParallel(current, xmitMax, delayts uint32) (parallel int, trigger bool) {
-	if delayts >= s.parallelDelayMs || !s.primaryReceived || !s.primaryReceivedTell {
+	if delayts >= s.parallelDelayMs {
 		trigger = s.tryParallel(current)
 	}
-	if current >= s.parallelExpireMs {
+	if current >= s.parallelExpireMs && s.primaryReceived && s.primaryReceivedTell {
 		return 1, trigger
 	}
 	if delayts > s.parallelDelaytsMax {
