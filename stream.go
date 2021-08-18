@@ -870,8 +870,8 @@ func (s *UDPStream) input(data []byte) {
 	s.mu.Unlock()
 	s.notifyFlushEvent(immediately)
 
-	// Logf(DEBUG, "UDPStream::input uuid:%v accepted:%v len:%v mmediately:%v trigger:%v replica:%v primaryRecovery:%v",
-	// 	s.uuid, s.accepted, len(data), immediately, trigger, replica, primaryRecovery)
+	// Logf(DEBUG, "UDPStream::input uuid:%v accepted:%v len:%v mmediately:%v trigger:%v replica:%v primaryReceived:%v",
+	// 	s.uuid, s.accepted, len(data), immediately, trigger, replica, primaryReceived)
 
 	atomic.AddUint64(&DefaultSnmp.InPkts, 1)
 	atomic.AddUint64(&DefaultSnmp.InBytes, uint64(len(data)))
