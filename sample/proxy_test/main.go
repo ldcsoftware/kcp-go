@@ -47,6 +47,7 @@ type client struct {
 	*net.TCPConn
 	idx     int
 	proxy   string
+	addr    net.Addr
 	count   int
 	cost    time.Duration
 	avgCost time.Duration
@@ -109,7 +110,7 @@ func echoTester(c *client, msglen, msgcount, sendIntervalMs int, costs []*CostSt
 		_, err = c.Write(buf)
 		if err != nil {
 			c.err = err
-			log.Printf("client:%v proxy:%v write err:%v \n", c.idx, c.proxy, err)
+			log.Printf("client:%v addr:%v proxy:%v write err:%v \n", c.idx, c.addr, c.proxy, err)
 			return err
 		}
 
@@ -120,7 +121,7 @@ func echoTester(c *client, msglen, msgcount, sendIntervalMs int, costs []*CostSt
 			n, err = c.Read(buf[nrecv:])
 			if err != nil {
 				c.err = err
-				log.Printf("client:%v proxy:%v read err:%v \n", c.idx, c.proxy, err)
+				log.Printf("client:%v addr:%v proxy:%v read err:%v \n", c.idx, c.addr, c.proxy, err)
 				return err
 			}
 			nrecv += n
@@ -176,8 +177,8 @@ func printRtoDetail(c *client, cost time.Duration, buf []byte) {
 			rtos_out = append(rtos_out, rto)
 		}
 	}
-	log.Printf("client:%v cost:%v rtos_out:%v out:%v xmit_out:%v passts_out:%v \n",
-		c.idx, cost, rtos_out, out, xmit_out, passts_out)
+	log.Printf("client:%v addr:%v cost:%v rtos_out:%v out:%v xmit_out:%v passts_out:%v \n",
+		c.idx, c.addr, cost, rtos_out, out, xmit_out, passts_out)
 
 	var in, xmit_in, passts_in uint16
 	ikcp_decode16u(buf[1010:], &in)
@@ -196,8 +197,8 @@ func printRtoDetail(c *client, cost time.Duration, buf []byte) {
 			rtos_in = append(rtos_in, rto)
 		}
 	}
-	log.Printf("client:%v cost:%v rtos_in:%v in:%v xmit_in:%v passts_in:%v \n",
-		c.idx, cost, rtos_in, in, xmit_in, passts_in)
+	log.Printf("client:%v addr:%v cost:%v rtos_in:%v in:%v xmit_in:%v passts_in:%v \n",
+		c.idx, c.addr, cost, rtos_in, in, xmit_in, passts_in)
 
 	atomic.StoreUint32(&done, 0)
 }
@@ -254,6 +255,7 @@ func main() {
 		for j := 0; j < batchNum; j++ {
 			go func(batchIdx, idx int) {
 				var conn net.Conn
+				var addr net.Addr
 				var err error
 				var dialer proxy.Dialer
 				var proxyAddrS string
@@ -264,20 +266,24 @@ func main() {
 					conn, err = dialer.Dial("tcp", *targetAddr)
 					checkError(err)
 					proxyAddrS = *proxyAddr
+					addr = conn.LocalAddr()
 				} else if *directProxyAddr != "" {
 					conn, err = net.Dial("tcp", *directProxyAddr)
 					checkError(err)
 					proxyAddrS = *directProxyAddr
+					addr = conn.LocalAddr()
 				} else {
 					conn, err = net.Dial("tcp", *targetAddr)
 					checkError(err)
+					addr = conn.LocalAddr()
 				}
 				cost := time.Since(start)
 				dialCostStat(cost)
 				c := &client{
 					proxy:   proxyAddrS,
 					TCPConn: conn.(*net.TCPConn),
-					idx:     i + 1,
+					idx:     batchIdx*batch + idx,
+					addr:    addr,
 				}
 				clients[batchIdx*batch+idx] = c
 				echoTester(c, *msglen, *msgcount, *sendIntervalMs, costs)
