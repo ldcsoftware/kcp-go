@@ -25,8 +25,9 @@ var (
 )
 
 const (
-	CleanTimeout              = time.Second * 5
-	HeartbeatInterval         = time.Second * 30
+	CleanWaitMs               = 3 * 1000
+	ReleaseWaitMs             = 2 * 1000
+	HeartbeatIntervalMs       = 30 * 1000
 	DefaultDeadLink           = 10
 	DefaultAckNoDelayRatio    = 0.7
 	DefaultAckNoDelayCount    = 60
@@ -39,6 +40,7 @@ const (
 	StateNone = iota // 0
 	StateEstablish
 	StateClosed
+	StateCleaned
 )
 
 const (
@@ -65,12 +67,13 @@ const (
 	DV1
 )
 
-type clean_callback func(uuid gouuid.UUID)
+type releaseCallback func(uuid gouuid.UUID)
 
 type (
 	// UDPStream defines a KCP session
 	UDPStream struct {
 		uuid     gouuid.UUID
+		fnvKey   uint32
 		state    int
 		sel      TunnelSelector
 		kcp      *KCP // KCP ARQ protocol
@@ -78,7 +81,8 @@ type (
 		locals   []*net.UDPAddr
 		remotes  []*net.UDPAddr
 		accepted bool
-		cleancb  clean_callback
+		releaseF releaseCallback
+		sched    *TimedSched
 
 		// kcp receiving is based on packets
 		// recvbuf turns packets into stream
@@ -87,13 +91,11 @@ type (
 		bufptr  []byte
 
 		// settings
-		hrtTicker  *time.Ticker // heart beat ticker
-		cleanTimer *time.Timer  // clean timer
-		rd         time.Time    // read deadline
-		wd         time.Time    // write deadline
-		headerSize int          // the header size additional to a KCP frame
-		ackNoDelay bool         // send ack immediately for each incoming packet(testing purpose)
-		writeDelay bool         // delay kcp.flush() for Write() for bulk transfer
+		rd         time.Time // read deadline
+		wd         time.Time // write deadline
+		headerSize int       // the header size additional to a KCP frame
+		ackNoDelay bool      // send ack immediately for each incoming packet(testing purpose)
+		writeDelay bool      // delay kcp.flush() for Write() for bulk transfer
 
 		// notifications
 		recvSynOnce    sync.Once
@@ -128,7 +130,7 @@ type (
 )
 
 // newUDPSession create a new udp session for client or server
-func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, sel TunnelSelector, cleancb clean_callback) (stream *UDPStream, err error) {
+func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, sel TunnelSelector, releaseF releaseCallback) (stream *UDPStream, err error) {
 	tunnels := sel.Pick(remotes)
 	if len(tunnels) == 0 || len(tunnels) != len(remotes) {
 		return nil, errTunnelPick
@@ -161,8 +163,10 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, sel TunnelS
 	stream.sendbuf = make([]byte, mtuLimit)
 	stream.recvbuf = make([]byte, mtuLimit)
 	stream.uuid = uuid
+	stream.fnvKey = fnv32(uuid)
 	stream.sel = sel
-	stream.cleancb = cleancb
+	stream.releaseF = releaseF
+	stream.sched = SystemTimedSched.Pick(stream.fnvKey)
 	if uuid.Version() == gouuid.V1 {
 		stream.headerSize = gouuid.Size
 	} else {
@@ -173,8 +177,6 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, sel TunnelS
 	stream.tunnels = tunnels
 	stream.locals = locals
 	stream.remotes = remoteAddrs
-	stream.hrtTicker = time.NewTicker(HeartbeatInterval)
-	stream.cleanTimer = time.NewTimer(CleanTimeout)
 	stream.parallelDelayMs = DefaultParallelDelayMs
 	stream.parallelIntervalMs = DefaultParallelIntervalMs
 	stream.parallelDurationMs = DefaultParallelDurationMs
@@ -190,9 +192,6 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, sel TunnelS
 	stream.kcp.ReserveBytes(stream.headerSize)
 	stream.kcp.dead_link = DefaultDeadLink
 	stream.kcp.cwnd = 1
-
-	stream.cleanTimer.Stop()
-	go stream.update()
 
 	Logf(INFO, "NewUDPStream uuid:%v accepted:%v locals:%v remotes:%v", uuid, accepted, locals, remotes)
 	return stream, nil
@@ -453,7 +452,7 @@ func (s *UDPStream) WriteFlag(flag byte, b []byte) (n int, err error) {
 }
 
 // WriteBuffers write a vector of byte slices to the underlying connection
-func (s *UDPStream) WriteBuffer(flag byte, b []byte, heartbeat bool) (n int, err error) {
+func (s *UDPStream) WriteBuffer(flag byte, b []byte, noBlock bool) (n int, err error) {
 	select {
 	case <-s.chClose:
 		return 0, io.ErrClosedPipe
@@ -497,9 +496,9 @@ func (s *UDPStream) WriteBuffer(flag byte, b []byte, heartbeat bool) (n int, err
 			// cost := time.Since(start)
 			// Logf(DEBUG, "UDPStream::Write finish uuid:%v accepted:%v randId:%v waitsnd:%v snd_wnd:%v rmt_wnd:%v snd_buf:%v snd_queue:%v cost:%v len:%v", s.uuid, s.accepted, randId, waitsnd, s.kcp.snd_wnd, s.kcp.rmt_wnd, len(s.kcp.snd_buf), len(s.kcp.snd_queue), cost, n)
 			return n, nil
-		} else if heartbeat {
+		} else if noBlock {
 			s.mu.Unlock()
-			return len(b), nil
+			return 0, nil
 		}
 		// Logf(DEBUG, "UDPStream::Write block uuid:%v accepted:%v randId:%v waitsnd:%v snd_wnd:%v rmt_wnd:%v snd_buf:%v snd_queue:%v", s.uuid, s.accepted, randId, waitsnd, s.kcp.snd_wnd, s.kcp.rmt_wnd, len(s.kcp.snd_buf), len(s.kcp.snd_queue))
 
@@ -547,8 +546,7 @@ func (s *UDPStream) Close() error {
 
 	s.WriteFlag(RST, nil)
 	close(s.chClose)
-	s.hrtTicker.Stop()
-	s.cleanTimer.Reset(CleanTimeout)
+	s.sched.Put(s.fnvKey, TS_NORMAL, s.clean, CleanWaitMs)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -644,7 +642,6 @@ func (s *UDPStream) accept() (err error) {
 	}
 	s.mu.Unlock()
 
-	s.flush()
 	s.establish()
 	return err
 }
@@ -654,6 +651,8 @@ func (s *UDPStream) establish() {
 
 	currestab := atomic.AddUint64(&DefaultSnmp.CurrEstab, 1)
 	atomicSetMax(&DefaultSnmp.MaxConn, currestab)
+
+	s.heartbeat()
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -675,58 +674,47 @@ func (s *UDPStream) reset() {
 	s.kcp.ReleaseTX()
 }
 
-// sess update to trigger protocol
-func (s *UDPStream) update() {
-	var flushTimer *time.Timer
-	var flushTimerCh <-chan time.Time
+func (s *UDPStream) clean() {
+	Logf(INFO, "UDPStream::clean uuid:%v accepted:%v", s.uuid, s.accepted)
 
-	for {
-		select {
-		case <-s.cleanTimer.C:
-			Logf(INFO, "UDPStream::clean uuid:%v accepted:%v", s.uuid, s.accepted)
-			s.mu.Lock()
-			s.kcp.ReleaseTX()
-			s.mu.Unlock()
-			if flushTimer != nil {
-				flushTimer.Stop()
-			}
-			s.cleancb(s.uuid)
-			return
-		case <-s.hrtTicker.C:
-			Logf(DEBUG, "UDPStream::heartbeat uuid:%v accepted:%v", s.uuid, s.accepted)
-			s.WriteFlag(HRT, nil)
-		case <-s.chFlushDelay:
-			if flushTimer == nil {
-				flushTimer = time.NewTimer(time.Duration(s.kcp.interval) * time.Millisecond)
-				flushTimerCh = flushTimer.C
-			}
-		case <-s.chFlushImmed:
-			if flushTimer != nil {
-				flushTimer.Stop()
-			}
-			if interval := s.flush(); interval != 0 {
-				flushTimer = time.NewTimer(time.Duration(interval) * time.Millisecond)
-				flushTimerCh = flushTimer.C
-			} else {
-				flushTimer = nil
-				flushTimerCh = nil
-			}
-		case <-flushTimerCh:
-			if interval := s.flush(); interval != 0 {
-				flushTimer = time.NewTimer(time.Duration(interval) * time.Millisecond)
-				flushTimerCh = flushTimer.C
-			} else {
-				flushTimer = nil
-				flushTimerCh = nil
-			}
-		}
+	s.mu.Lock()
+	s.state = StateCleaned
+	s.mu.Unlock()
+	s.sched.Put(s.fnvKey, TS_NORMAL, s.release, ReleaseWaitMs)
+}
+
+func (s *UDPStream) release() {
+	Logf(INFO, "UDPStream::release uuid:%v accepted:%v", s.uuid, s.accepted)
+
+	s.mu.Lock()
+	s.kcp.ReleaseTX()
+	s.mu.Unlock()
+	s.sched.Release(s.fnvKey)
+	s.releaseF(s.uuid)
+}
+
+//heartbeat may delay 30s - 3s - 2s after close
+func (s *UDPStream) heartbeat() {
+	select {
+	case <-s.chClose:
+		return
+	default:
 	}
+
+	Logf(DEBUG, "UDPStream::heartbeat uuid:%v accepted:%v", s.uuid, s.accepted)
+	s.WriteFlag(HRT, nil)
+	s.sched.Put(s.fnvKey, TS_NORMAL, s.heartbeat, HeartbeatIntervalMs)
 }
 
 // flush sends data in txqueue if there is any
 // return if interval means next flush interval
-func (s *UDPStream) flush() (interval uint32) {
+func (s *UDPStream) flush() {
+	var interval uint32
 	s.mu.Lock()
+	if s.state == StateCleaned {
+		s.mu.Unlock()
+		return
+	}
 	if s.kcp.state != 0xFFFFFFFF {
 		interval = s.kcp.flush(false)
 		if s.kcp.state == 0xFFFFFFFF {
@@ -741,6 +729,10 @@ func (s *UDPStream) flush() (interval uint32) {
 		s.mu.Unlock()
 		if notifyWrite {
 			s.notifyWriteEvent()
+		}
+
+		if interval != 0 {
+			s.sched.Put(s.fnvKey, TS_EXCLUSIVE, s.flush, interval)
 		}
 		return
 	}
@@ -761,7 +753,10 @@ func (s *UDPStream) flush() (interval uint32) {
 			tunnels[i].output(msgs)
 		}
 	}
-	return
+
+	if interval != 0 {
+		s.sched.Put(s.fnvKey, TS_EXCLUSIVE, s.flush, interval)
+	}
 }
 
 func (s *UDPStream) tryParallel(current uint32) bool {
@@ -781,6 +776,9 @@ func (s *UDPStream) tryParallel(current uint32) bool {
 }
 
 func (s *UDPStream) getParallel(current, xmitMax, delayts uint32) (parallel int, trigger bool) {
+	if s.parallelDelayMs == 0 || s.kcp.snd_una == 0 {
+		return len(s.tunnels), false
+	}
 	if delayts >= s.parallelDelayMs {
 		trigger = s.tryParallel(current)
 	}
@@ -801,13 +799,7 @@ func (s *UDPStream) getParallel(current, xmitMax, delayts uint32) (parallel int,
 }
 
 func (s *UDPStream) output(buf []byte, current, xmitMax, delayts uint32) {
-	var appendCount int
-	var trigger bool
-	if s.parallelDelayMs == 0 || s.state == StateNone {
-		appendCount = len(s.tunnels)
-	} else {
-		appendCount, trigger = s.getParallel(current, xmitMax, delayts)
-	}
+	appendCount, trigger := s.getParallel(current, xmitMax, delayts)
 	for i := len(s.msgss); i < appendCount; i++ {
 		s.msgss = append(s.msgss, make([]ipv4.Message, 0))
 	}
@@ -838,6 +830,10 @@ func (s *UDPStream) input(data []byte) {
 	trigger, replica := s.decodeFrameHeader(data)
 
 	s.mu.Lock()
+	if s.state == StateCleaned {
+		s.mu.Unlock()
+		return
+	}
 	if trigger {
 		s.tryParallel(currentMs())
 	}
@@ -897,17 +893,13 @@ func (s *UDPStream) notifyWriteEvent() {
 }
 
 func (s *UDPStream) notifyFlushEvent(immediately bool) {
+	tsMode := TS_ONCE
+	delayMs := s.kcp.interval
 	if immediately {
-		select {
-		case s.chFlushImmed <- struct{}{}:
-		default:
-		}
-	} else {
-		select {
-		case s.chFlushDelay <- struct{}{}:
-		default:
-		}
+		tsMode = TS_EXCLUSIVE
+		delayMs = 0
 	}
+	s.sched.Put(s.fnvKey, tsMode, s.flush, delayMs)
 }
 
 func (s *UDPStream) cmdRead(flag byte, data []byte, b []byte) (n int, err error) {
