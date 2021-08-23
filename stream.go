@@ -4,7 +4,6 @@ import (
 	"errors"
 	"io"
 	"net"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -59,6 +58,7 @@ const (
 const (
 	_ byte = iota
 	FV1
+	FV2
 )
 
 const (
@@ -166,11 +166,7 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, sel TunnelS
 	stream.uuid = uuid
 	stream.sel = sel
 	stream.cleancb = cleancb
-	if uuid.Version() == gouuid.V1 {
-		stream.headerSize = gouuid.Size
-	} else {
-		stream.headerSize = gouuid.Size + 1
-	}
+	stream.headerSize = gouuid.Size + 1
 	stream.msgss = make([][]ipv4.Message, 0)
 	stream.accepted = accepted
 	stream.tunnels = tunnels
@@ -826,7 +822,7 @@ func (s *UDPStream) output(buf []byte, current, xmitMax, delayts uint32) {
 
 	msg := ipv4.Message{}
 	copy(buf, s.uuid[:])
-	s.encodeFrameHeader(buf[:s.headerSize])
+	s.encodeFrameHeader(buf[:s.headerSize], FV2)
 	if trigger {
 		s.setFrameReplicaTrigger(buf)
 	}
@@ -851,7 +847,7 @@ func (s *UDPStream) output(buf []byte, current, xmitMax, delayts uint32) {
 func (s *UDPStream) input(data []byte) {
 	var kcpInErrors uint64
 
-	trigger, replica, primaryReceived := s.decodeFrameHeader(data)
+	fv, trigger, replica, primaryReceived := s.decodeFrameHeader(data)
 
 	s.mu.Lock()
 	if trigger {
@@ -860,7 +856,15 @@ func (s *UDPStream) input(data []byte) {
 	if !replica {
 		s.primaryReceivedTell = true
 	}
-	s.primaryReceived = primaryReceived
+
+	if fv == FV1 {
+		if !replica {
+			s.primaryReceived = true
+		}
+	} else {
+		s.primaryReceived = primaryReceived
+	}
+
 	if ret := s.kcp.Input(data[s.headerSize:], !replica, false); ret != 0 {
 		kcpInErrors++
 	}
@@ -1017,9 +1021,6 @@ func (s *UDPStream) recvRst(data []byte) (n int, err error) {
 //version uint8
 //locals uint8 (len) + (uint8 + addr) + (uint8 + addr)...
 func (s *UDPStream) encodeDialInfo(locals []string) ([]byte, error) {
-	if s.uuid.Version() == gouuid.V1 {
-		return []byte(strings.Join(locals, " ")), nil
-	}
 	addrLen := 1
 	for _, local := range locals {
 		_, err := net.ResolveUDPAddr("udp", local)
@@ -1038,9 +1039,6 @@ func (s *UDPStream) encodeDialInfo(locals []string) ([]byte, error) {
 }
 
 func (s *UDPStream) decodeDialInfo(buf []byte) ([]string, error) {
-	if s.uuid.Version() == gouuid.V1 {
-		return strings.Split(string(buf), " "), nil
-	}
 	var err error
 	var version byte
 	var addrs byte
@@ -1063,44 +1061,30 @@ func (s *UDPStream) decodeDialInfo(buf []byte) ([]string, error) {
 }
 
 //uuid + version(4bit) + replica_trigger(1 bit) + replica(1 bit) + none_use(2 bit)
-func (s *UDPStream) encodeFrameHeader(buf []byte) {
+func (s *UDPStream) encodeFrameHeader(buf []byte, fv byte) {
 	copy(buf, s.uuid[:])
-	if s.uuid.Version() == gouuid.V1 {
-		return
-	}
-	buf[gouuid.Size] = FV1 << 4
+	buf[gouuid.Size] = fv << 4
 }
 
 func (s *UDPStream) setFrameReplicaTrigger(buf []byte) {
-	if s.uuid.Version() == gouuid.V1 {
-		return
-	}
 	buf[gouuid.Size] = buf[gouuid.Size] | FRAME_FLAG_REPLICA_TRIGGER
 }
 
 func (s *UDPStream) setFrameReplica(buf []byte) {
-	if s.uuid.Version() == gouuid.V1 {
-		return
-	}
 	buf[gouuid.Size] = buf[gouuid.Size] | FRAME_FLAG_REPLICA
 }
 
 func (s *UDPStream) setFramePrimaryReceived(buf []byte) {
-	if s.uuid.Version() == gouuid.V1 {
-		return
-	}
 	buf[gouuid.Size] = buf[gouuid.Size] | FRAME_FLAG_PRIMARY_RECEIVED
 }
 
-func (s *UDPStream) decodeFrameHeader(buf []byte) (trigger, replica, primaryReceived bool) {
-	if s.uuid.Version() == gouuid.V1 || len(buf) <= gouuid.Size {
+func (s *UDPStream) decodeFrameHeader(buf []byte) (fv byte, trigger, replica, primaryReceived bool) {
+	if len(buf) <= gouuid.Size {
 		return
 	}
 	verFlag := buf[gouuid.Size]
-	if verFlag>>4 != FV1 {
-		return
-	}
-	return verFlag&FRAME_FLAG_REPLICA_TRIGGER != 0,
+	return verFlag >> 4,
+		verFlag&FRAME_FLAG_REPLICA_TRIGGER != 0,
 		verFlag&FRAME_FLAG_REPLICA != 0,
 		verFlag&FRAME_FLAG_PRIMARY_RECEIVED != 0
 }
