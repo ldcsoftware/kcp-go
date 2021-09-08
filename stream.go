@@ -4,7 +4,6 @@ import (
 	"errors"
 	"io"
 	"net"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -50,14 +49,16 @@ const (
 )
 
 const (
-	FRAME_FLAG_PARALLEL_NTF = 0x08
-	FRAME_FLAG_REPLICA      = 0x04
+	FRAME_FLAG_REPLICA_TRIGGER  = 0x08
+	FRAME_FLAG_REPLICA          = 0x04
+	FRAME_FLAG_PRIMARY_RECEIVED = 0x02
 )
 
 // FRAME versions
 const (
 	_ byte = iota
 	FV1
+	FV2
 )
 
 const (
@@ -115,12 +116,14 @@ type (
 		msgss [][]ipv4.Message
 		mu    sync.Mutex
 
-		parallelDelayMs    uint32
-		parallelIntervalMs uint32
-		parallelDurationMs uint32
-		parallelExpireMs   uint32
-		parallelDelaytsMax uint32
-		primaryBreakOff    bool
+		parallelDelayMs     uint32
+		parallelIntervalMs  uint32
+		parallelDurationMs  uint32
+		parallelExpireMs    uint32
+		parallelDelaytsMax  uint32
+		parallelStatus      bool
+		primaryReceived     bool // received primary data by target
+		primaryReceivedTell bool // received primary data from target
 
 		ackNoDelayRatio float32
 		ackNoDelayCount uint32
@@ -163,11 +166,7 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, sel TunnelS
 	stream.uuid = uuid
 	stream.sel = sel
 	stream.cleancb = cleancb
-	if uuid.Version() == gouuid.V1 {
-		stream.headerSize = gouuid.Size
-	} else {
-		stream.headerSize = gouuid.Size + 1
-	}
+	stream.headerSize = gouuid.Size + 1
 	stream.msgss = make([][]ipv4.Message, 0)
 	stream.accepted = accepted
 	stream.tunnels = tunnels
@@ -180,7 +179,6 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, sel TunnelS
 	stream.parallelDurationMs = DefaultParallelDurationMs
 	stream.ackNoDelayRatio = DefaultAckNoDelayRatio
 	stream.ackNoDelayCount = DefaultAckNoDelayCount
-	stream.primaryBreakOff = true
 
 	stream.kcp = NewKCP(1, func(buf []byte, size int, current, xmitMax, delayts uint32) {
 		if size >= IKCP_OVERHEAD+stream.headerSize {
@@ -686,6 +684,10 @@ func (s *UDPStream) update() {
 			Logf(INFO, "UDPStream::clean uuid:%v accepted:%v", s.uuid, s.accepted)
 			s.mu.Lock()
 			s.kcp.ReleaseTX()
+			if s.parallelStatus {
+				s.parallelStatus = false
+				atomic.AddUint64(&DefaultSnmp.ParallelStatuss, ^uint64(0))
+			}
 			s.mu.Unlock()
 			if flushTimer != nil {
 				flushTimer.Stop()
@@ -775,7 +777,8 @@ func (s *UDPStream) tryParallel(current uint32) bool {
 		trigger = true
 		s.parallelDelaytsMax = 0
 	}
-	s.primaryBreakOff = true
+	s.primaryReceived = false
+	s.primaryReceivedTell = false
 	s.parallelExpireMs = current + s.parallelDurationMs
 	return trigger
 }
@@ -784,7 +787,7 @@ func (s *UDPStream) getParallel(current, xmitMax, delayts uint32) (parallel int,
 	if delayts >= s.parallelDelayMs {
 		trigger = s.tryParallel(current)
 	}
-	if current >= s.parallelExpireMs && !s.primaryBreakOff {
+	if current >= s.parallelExpireMs && s.primaryReceived && s.primaryReceivedTell {
 		return 1, trigger
 	}
 	if delayts > s.parallelDelaytsMax {
@@ -801,22 +804,31 @@ func (s *UDPStream) getParallel(current, xmitMax, delayts uint32) (parallel int,
 }
 
 func (s *UDPStream) output(buf []byte, current, xmitMax, delayts uint32) {
-	var appendCount int
-	var trigger bool
-	if s.parallelDelayMs == 0 || s.state == StateNone {
-		appendCount = len(s.tunnels)
-	} else {
-		appendCount, trigger = s.getParallel(current, xmitMax, delayts)
-	}
+	appendCount, trigger := s.getParallel(current, xmitMax, delayts)
 	for i := len(s.msgss); i < appendCount; i++ {
 		s.msgss = append(s.msgss, make([]ipv4.Message, 0))
 	}
 
-	// Logf(DEBUG, "UDPStream::output uuid:%v accepted:%v len:%v xmitMax:%v appendCount:%v", s.uuid, s.accepted, len(buf), xmitMax, appendCount)
+	if appendCount > 1 && !s.parallelStatus {
+		s.parallelStatus = true
+		atomic.AddUint64(&DefaultSnmp.ParallelStatuss, 1)
+	} else if appendCount == 1 && s.parallelStatus {
+		s.parallelStatus = false
+		atomic.AddUint64(&DefaultSnmp.ParallelStatuss, ^uint64(0))
+	}
+
+	// Logf(DEBUG, "UDPStream::output uuid:%v accepted:%v len:%v xmitMax:%v delayts:%v appendCount:%v",
+	// 	s.uuid, s.accepted, len(buf), xmitMax, delayts, appendCount)
 
 	msg := ipv4.Message{}
 	copy(buf, s.uuid[:])
-	s.encodeFrameHeader(buf[:s.headerSize], trigger)
+	s.encodeFrameHeader(buf[:s.headerSize], FV2)
+	if trigger {
+		s.setFrameReplicaTrigger(buf)
+	}
+	if s.primaryReceivedTell {
+		s.setFramePrimaryReceived(buf)
+	}
 	msg.Buffers = [][]byte{buf}
 	msg.Addr = s.remotes[0]
 	s.msgss[0] = append(s.msgss[0], msg)
@@ -835,15 +847,24 @@ func (s *UDPStream) output(buf []byte, current, xmitMax, delayts uint32) {
 func (s *UDPStream) input(data []byte) {
 	var kcpInErrors uint64
 
-	trigger, replica := s.decodeFrameHeader(data)
+	fv, trigger, replica, primaryReceived := s.decodeFrameHeader(data)
 
 	s.mu.Lock()
 	if trigger {
 		s.tryParallel(currentMs())
 	}
 	if !replica {
-		s.primaryBreakOff = false
+		s.primaryReceivedTell = true
 	}
+
+	if fv == FV1 {
+		if !replica {
+			s.primaryReceived = true
+		}
+	} else {
+		s.primaryReceived = primaryReceived
+	}
+
 	if ret := s.kcp.Input(data[s.headerSize:], !replica, false); ret != 0 {
 		kcpInErrors++
 	}
@@ -866,7 +887,8 @@ func (s *UDPStream) input(data []byte) {
 	s.mu.Unlock()
 	s.notifyFlushEvent(immediately)
 
-	// Logf(DEBUG, "UDPStream::input uuid:%v accepted:%v len:%v rmtWnd:%v mmediately:%v", s.uuid, s.accepted, len(data), s.kcp.rmt_wnd, immediately)
+	// Logf(DEBUG, "UDPStream::input uuid:%v accepted:%v len:%v mmediately:%v trigger:%v replica:%v primaryReceived:%v",
+	// 	s.uuid, s.accepted, len(data), immediately, trigger, replica, primaryReceived)
 
 	atomic.AddUint64(&DefaultSnmp.InPkts, 1)
 	atomic.AddUint64(&DefaultSnmp.InBytes, uint64(len(data)))
@@ -999,9 +1021,6 @@ func (s *UDPStream) recvRst(data []byte) (n int, err error) {
 //version uint8
 //locals uint8 (len) + (uint8 + addr) + (uint8 + addr)...
 func (s *UDPStream) encodeDialInfo(locals []string) ([]byte, error) {
-	if s.uuid.Version() == gouuid.V1 {
-		return []byte(strings.Join(locals, " ")), nil
-	}
 	addrLen := 1
 	for _, local := range locals {
 		_, err := net.ResolveUDPAddr("udp", local)
@@ -1020,9 +1039,6 @@ func (s *UDPStream) encodeDialInfo(locals []string) ([]byte, error) {
 }
 
 func (s *UDPStream) decodeDialInfo(buf []byte) ([]string, error) {
-	if s.uuid.Version() == gouuid.V1 {
-		return strings.Split(string(buf), " "), nil
-	}
 	var err error
 	var version byte
 	var addrs byte
@@ -1044,33 +1060,31 @@ func (s *UDPStream) decodeDialInfo(buf []byte) ([]string, error) {
 	return remotes, nil
 }
 
-//uuid + version(4bit) + parallel_notify(1 bit) + replica(1 bit) + none_use(2 bit)
-func (s *UDPStream) encodeFrameHeader(buf []byte, parallel bool) {
+//uuid + version(4bit) + replica_trigger(1 bit) + replica(1 bit) + none_use(2 bit)
+func (s *UDPStream) encodeFrameHeader(buf []byte, fv byte) {
 	copy(buf, s.uuid[:])
-	if s.uuid.Version() == gouuid.V1 {
-		return
-	}
-	verFlag := FV1 << 4
-	if parallel {
-		verFlag |= FRAME_FLAG_PARALLEL_NTF
-	}
-	buf[gouuid.Size] = verFlag
+	buf[gouuid.Size] = fv << 4
+}
+
+func (s *UDPStream) setFrameReplicaTrigger(buf []byte) {
+	buf[gouuid.Size] = buf[gouuid.Size] | FRAME_FLAG_REPLICA_TRIGGER
 }
 
 func (s *UDPStream) setFrameReplica(buf []byte) {
-	if s.uuid.Version() == gouuid.V1 {
-		return
-	}
 	buf[gouuid.Size] = buf[gouuid.Size] | FRAME_FLAG_REPLICA
 }
 
-func (s *UDPStream) decodeFrameHeader(buf []byte) (bool, bool) {
-	if s.uuid.Version() == gouuid.V1 || len(buf) <= gouuid.Size {
-		return false, false
+func (s *UDPStream) setFramePrimaryReceived(buf []byte) {
+	buf[gouuid.Size] = buf[gouuid.Size] | FRAME_FLAG_PRIMARY_RECEIVED
+}
+
+func (s *UDPStream) decodeFrameHeader(buf []byte) (fv byte, trigger, replica, primaryReceived bool) {
+	if len(buf) <= gouuid.Size {
+		return
 	}
 	verFlag := buf[gouuid.Size]
-	if verFlag>>4 != FV1 {
-		return false, false
-	}
-	return verFlag&FRAME_FLAG_PARALLEL_NTF != 0, verFlag&FRAME_FLAG_REPLICA != 0
+	return verFlag >> 4,
+		verFlag&FRAME_FLAG_REPLICA_TRIGGER != 0,
+		verFlag&FRAME_FLAG_REPLICA != 0,
+		verFlag&FRAME_FLAG_PRIMARY_RECEIVED != 0
 }
