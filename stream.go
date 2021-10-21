@@ -116,12 +116,14 @@ type (
 		msgss [][]ipv4.Message
 		mu    sync.Mutex
 
-		parallelDelayMs     uint32
-		parallelIntervalMs  uint32
-		parallelDurationMs  uint32
-		parallelExpireMs    uint32
-		parallelDelaytsMax  uint32
-		parallelStatus      bool
+		parallelDelayMs    uint32
+		parallelIntervalMs uint32
+		parallelDurationMs uint32
+		parallelExpireMs   uint32
+		parallelDelaytsMax uint32
+		parallelStatus     bool // whether current status is parallel or not
+
+		useParallel         bool // set parallel or not
 		primaryReceived     bool // received primary data by target
 		primaryReceivedTell bool // received primary data from target
 
@@ -331,6 +333,12 @@ func (s *UDPStream) SetParallelDurationMs(durationMs uint32) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.parallelDurationMs = durationMs
+}
+
+func (s *UDPStream) SetUseParallel(useParallel bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.useParallel = useParallel
 }
 
 func (s *UDPStream) WaitSnd() int {
@@ -787,7 +795,7 @@ func (s *UDPStream) getParallel(current, xmitMax, delayts uint32) (parallel int,
 	if delayts >= s.parallelDelayMs {
 		trigger = s.tryParallel(current)
 	}
-	if current >= s.parallelExpireMs && s.primaryReceived && s.primaryReceivedTell {
+	if current >= s.parallelExpireMs && s.primaryReceived && s.primaryReceivedTell && !s.useParallel {
 		return 1, trigger
 	}
 	if delayts > s.parallelDelaytsMax {
@@ -847,7 +855,7 @@ func (s *UDPStream) output(buf []byte, current, xmitMax, delayts uint32) {
 func (s *UDPStream) input(data []byte) {
 	var kcpInErrors uint64
 
-	fv, trigger, replica, primaryReceived := s.decodeFrameHeader(data)
+	_, trigger, replica, primaryReceived := s.decodeFrameHeader(data)
 
 	s.mu.Lock()
 	if trigger {
@@ -856,14 +864,7 @@ func (s *UDPStream) input(data []byte) {
 	if !replica {
 		s.primaryReceivedTell = true
 	}
-
-	if fv == FV1 {
-		if !replica {
-			s.primaryReceived = true
-		}
-	} else {
-		s.primaryReceived = primaryReceived
-	}
+	s.primaryReceived = primaryReceived
 
 	if ret := s.kcp.Input(data[s.headerSize:], !replica, false); ret != 0 {
 		kcpInErrors++
