@@ -230,17 +230,3 @@ func atomicSetMax(pv *uint64, nv uint64) {
 func statRto(rto int) {
 	atomicSetMax(&DefaultSnmp.RtoMax, uint64(rto))
 }
-
-func statAckCost(xmit int, cost int) {
-	if xmit < STAT_XMIT_MIN || xmit > STAT_XMIT_MAX {
-		return
-	}
-	atomicSetMax(&DefaultSnmp.AckCostMax, uint64(cost))
-}
-
-func statXmitInterval(xmit int, interval int) {
-	if xmit < STAT_XMIT_MIN || xmit > STAT_XMIT_MAX {
-		return
-	}
-	atomicSetMax(&DefaultSnmp.XmitIntervalMax[xmit-1], uint64(interval))
-}

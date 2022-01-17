@@ -196,26 +196,6 @@ func TestSNMP(t *testing.T) {
 	statRto(30)
 	assert.Equal(t, uint64(30), DefaultSnmp.RtoMax)
 
-	statAckCost(1, 20)
-	assert.Equal(t, uint64(0), DefaultSnmp.AckCostMax)
-	statAckCost(2, 20)
-	assert.Equal(t, uint64(20), DefaultSnmp.AckCostMax)
-	statAckCost(3, 30)
-	assert.Equal(t, uint64(30), DefaultSnmp.AckCostMax)
-	statAckCost(STAT_XMIT_MAX+1, 40)
-	assert.Equal(t, uint64(30), DefaultSnmp.AckCostMax)
-
-	statXmitInterval(1, 20)
-	assert.Equal(t, uint64(0), DefaultSnmp.XmitIntervalMax[0])
-	statXmitInterval(2, 20)
-	assert.Equal(t, uint64(20), DefaultSnmp.XmitIntervalMax[1])
-	statXmitInterval(3, 30)
-	assert.Equal(t, uint64(20), DefaultSnmp.XmitIntervalMax[1])
-	assert.Equal(t, uint64(30), DefaultSnmp.XmitIntervalMax[2])
-	statXmitInterval(STAT_XMIT_MAX+1, 40)
-	assert.Equal(t, uint64(20), DefaultSnmp.XmitIntervalMax[1])
-	assert.Equal(t, uint64(30), DefaultSnmp.XmitIntervalMax[2])
-
 	currEstab := DefaultSnmp.CurrEstab
 	Logf(INFO, "start establish:%v", DefaultSnmp.CurrEstab)
 
@@ -301,13 +281,13 @@ func TestFrameHeaderEncode(t *testing.T) {
 	assert.False(t, parallel)
 	assert.Equal(t, FV1, fv)
 
-	s1.encodeFrameHeader(buf, FV2)
+	s1.encodeFrameHeader(buf, FV1)
 	s1.setFrameReplicaTrigger(buf)
 	fv, parallel, replica, primaryReceived = s1.decodeFrameHeader(buf)
 	assert.True(t, parallel)
 	assert.False(t, replica)
 	assert.False(t, primaryReceived)
-	assert.Equal(t, FV2, fv)
+	assert.Equal(t, FV1, fv)
 
 	s1.encodeFrameHeader(buf, FV1)
 	s1.setFramePrimaryReceived(buf)
@@ -317,7 +297,7 @@ func TestFrameHeaderEncode(t *testing.T) {
 	assert.True(t, primaryReceived)
 	assert.Equal(t, FV1, fv)
 
-	s1.encodeFrameHeader(buf, FV2)
+	s1.encodeFrameHeader(buf, FV1)
 	s1.setFrameReplicaTrigger(buf)
 	s1.setFrameReplica(buf)
 	s1.setFramePrimaryReceived(buf)
@@ -325,7 +305,7 @@ func TestFrameHeaderEncode(t *testing.T) {
 	assert.True(t, parallel)
 	assert.True(t, replica)
 	assert.True(t, primaryReceived)
-	assert.Equal(t, FV2, fv)
+	assert.Equal(t, FV1, fv)
 }
 
 func tunnelSimulate(tunnels []*UDPTunnel, loss float64, delayMin, delayMax int) {
@@ -1080,13 +1060,13 @@ func TestParallelOutput(t *testing.T) {
 	assert.False(t, par)
 	assert.False(t, replica)
 	assert.False(t, primaryReceived)
-	assert.Equal(t, FV2, fv)
+	assert.Equal(t, FV1, fv)
 
 	fv, par, replica, primaryReceived = s.decodeFrameHeader(s.msgss[1][0].Buffers[0])
 	assert.False(t, par)
 	assert.True(t, replica)
 	assert.False(t, primaryReceived)
-	assert.Equal(t, FV2, fv)
+	assert.Equal(t, FV1, fv)
 
 	s.primaryReceived = true
 	s.primaryReceivedTell = true
@@ -1100,7 +1080,7 @@ func TestParallelOutput(t *testing.T) {
 	assert.False(t, par)
 	assert.False(t, replica)
 	assert.True(t, primaryReceived)
-	assert.Equal(t, FV2, fv)
+	assert.Equal(t, FV1, fv)
 
 	s.output(buf, current, 0, 200)
 
@@ -1112,13 +1092,13 @@ func TestParallelOutput(t *testing.T) {
 	assert.True(t, par)
 	assert.False(t, replica)
 	assert.False(t, primaryReceived)
-	assert.Equal(t, FV2, fv)
+	assert.Equal(t, FV1, fv)
 
 	fv, par, replica, primaryReceived = s.decodeFrameHeader(s.msgss[1][1].Buffers[0])
 	assert.True(t, par)
 	assert.True(t, replica)
 	assert.False(t, primaryReceived)
-	assert.Equal(t, FV2, fv)
+	assert.Equal(t, FV1, fv)
 
 	s.output(buf, current, 0, 350)
 	assert.Equal(t, 3, len(s.msgss))
@@ -1135,13 +1115,13 @@ func TestParallelOutput(t *testing.T) {
 	assert.False(t, par)
 	assert.False(t, replica)
 	assert.False(t, primaryReceived)
-	assert.Equal(t, FV2, fv)
+	assert.Equal(t, FV1, fv)
 
 	fv, par, replica, primaryReceived = s.decodeFrameHeader(s.msgss[2][1].Buffers[0])
 	assert.False(t, par)
 	assert.True(t, replica)
 	assert.False(t, primaryReceived)
-	assert.Equal(t, FV2, fv)
+	assert.Equal(t, FV1, fv)
 }
 
 func TestKcpFlush(t *testing.T) {

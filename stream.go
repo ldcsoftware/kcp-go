@@ -58,7 +58,6 @@ const (
 const (
 	_ byte = iota
 	FV1
-	FV2
 )
 
 const (
@@ -791,9 +790,27 @@ func (s *UDPStream) tryParallel(current uint32) bool {
 	return trigger
 }
 
+func (s *UDPStream) timeOverflowCheck(current uint32) {
+	if current >= s.parallelExpireMs {
+		return
+	}
+	parallelDurationMs := s.parallelExpireMs - current
+	if parallelDurationMs <= s.parallelDurationMs {
+		return
+	}
+	// overflow, then deal base on parallel status
+	if s.parallelStatus {
+		s.parallelExpireMs = current + s.parallelDurationMs
+	} else {
+		s.parallelExpireMs = current
+	}
+}
+
 func (s *UDPStream) getParallel(current, xmitMax, delayts uint32) (parallel int, trigger bool) {
 	if delayts >= s.parallelDelayMs {
 		trigger = s.tryParallel(current)
+	} else {
+		s.timeOverflowCheck(current)
 	}
 	if current >= s.parallelExpireMs && s.primaryReceived && s.primaryReceivedTell && !s.useParallel {
 		return 1, trigger
@@ -830,7 +847,7 @@ func (s *UDPStream) output(buf []byte, current, xmitMax, delayts uint32) {
 
 	msg := ipv4.Message{}
 	copy(buf, s.uuid[:])
-	s.encodeFrameHeader(buf[:s.headerSize], FV2)
+	s.encodeFrameHeader(buf[:s.headerSize], FV1)
 	if trigger {
 		s.setFrameReplicaTrigger(buf)
 	}
