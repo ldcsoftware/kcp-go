@@ -519,7 +519,6 @@ func main() {
 			}
 			stream.SetWindowSize(wndSize, wndSize*2)
 			stream.SetNoDelay(kcp.FastStreamOption.Nodelay, interval, kcp.FastStreamOption.Resend, kcp.FastStreamOption.Nc)
-			stream.SetParallelXmit(uint32(parallelXmit))
 
 			kcp.Logf(kcp.WARN, "Open UDPStream. uuid:%v cost:%v", stream.GetUUID(), time.Since(start))
 			return stream, nil
