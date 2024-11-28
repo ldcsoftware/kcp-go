@@ -55,10 +55,13 @@ func init() {
 var refTime time.Time = time.Now()
 
 // currentMs returns current elasped monotonic milliseconds since program startup
-func currentMs() uint32 { return uint32(time.Now().Sub(refTime) / time.Millisecond) }
+func currentMs() (uint32, uint64) {
+	sinceMs := uint64(time.Since(refTime) / time.Millisecond)
+	return uint32(sinceMs), sinceMs
+}
 
 // output_callback is a prototype which ought capture conn and call conn.Write
-type output_callback func(buf []byte, size int, current, xmitMax, delayts uint32)
+type output_callback func(buf []byte, size int, current uint64, xmitMax, delayts uint32)
 
 /* encode 8 bits unsigned int */
 func ikcp_encode8u(p []byte, c byte) []byte {
@@ -623,7 +626,7 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 	var latest uint32 // the latest ack packet
 	var flag int
 	var inSegs uint64
-	current := currentMs()
+	current, _ := currentMs()
 
 	for {
 		var ts, sn, length, una, conv uint32
@@ -770,6 +773,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 	var ptr []byte
 
 	var current uint32
+	var current64 uint64
 	var xmitMax uint32
 	var delayts uint32
 
@@ -785,7 +789,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 		}
 		size := len(buffer) - len(ptr)
 		if size+space > int(kcp.mtu) {
-			kcp.output(buffer, size, current, xmitMax, delayts)
+			kcp.output(buffer, size, current64, xmitMax, delayts)
 			makeBuffer()
 			xmitMax = 0
 			delayts = 0
@@ -796,7 +800,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 	flushBuffer := func() {
 		size := len(buffer) - len(ptr)
 		if size > kcp.reserved {
-			kcp.output(buffer, size, current, xmitMax, delayts)
+			kcp.output(buffer, size, current64, xmitMax, delayts)
 			xmitMax = 0
 			delayts = 0
 		}
@@ -824,7 +828,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 
 	// probe window size (if remote window size equals zero)
 	if kcp.rmt_wnd == 0 {
-		current = currentMs()
+		current, current64 = currentMs()
 		if kcp.probe_wait == 0 {
 			kcp.probe_wait = IKCP_PROBE_INIT
 			kcp.ts_probe = current + kcp.probe_wait
@@ -890,7 +894,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 	}
 
 	// check for retransmissions
-	current = currentMs()
+	current, current64 = currentMs()
 	var change, lostSegs, fastRetransSegs, earlyRetransSegs uint64
 	minrto := int32(kcp.interval)
 
@@ -935,7 +939,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 		}
 
 		if needsend {
-			current = currentMs()
+			current, current64 = currentMs()
 			segment.xmit++
 			segment.ts = current
 			segment.wnd = seg.wnd
@@ -1030,7 +1034,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 func (kcp *KCP) Update() {
 	var slap int32
 
-	current := currentMs()
+	current, _ := currentMs()
 	if kcp.updated == 0 {
 		kcp.updated = 1
 		kcp.ts_flush = current
@@ -1062,7 +1066,7 @@ func (kcp *KCP) Update() {
 // schedule ikcp_update (eg. implementing an epoll-like mechanism,
 // or optimize ikcp_update when handling massive kcp connections)
 func (kcp *KCP) Check() uint32 {
-	current := currentMs()
+	current, _ := currentMs()
 	ts_flush := kcp.ts_flush
 	tm_flush := int32(0x7fffffff)
 	tm_packet := int32(0x7fffffff)

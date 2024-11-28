@@ -951,23 +951,23 @@ func TestTryParallel(t *testing.T) {
 		headerSize: gouuid.Size + 1,
 	}
 
-	var durationMs uint32 = 100
-	s.SetParallelDurationMs(durationMs)
+	var durationMs uint64 = 100
+	s.SetParallelDurationMs(uint32(durationMs))
 
-	current := currentMs()
+	_, current64 := currentMs()
 	trigger := s.tryParallel(0)
 	assert.True(t, trigger)
-	assert.Equal(t, s.parallelExpireMs, current+durationMs)
+	assert.Equal(t, s.parallelExpireMs, current64+durationMs)
 
-	current += 90
-	trigger = s.tryParallel(current)
+	current64 += 90
+	trigger = s.tryParallel(current64)
 	assert.False(t, trigger)
-	assert.Equal(t, s.parallelExpireMs, current+durationMs)
+	assert.Equal(t, s.parallelExpireMs, current64+durationMs)
 
-	current += 20
-	trigger = s.tryParallel(current)
+	current64 += 20
+	trigger = s.tryParallel(current64)
 	assert.False(t, trigger)
-	assert.Equal(t, s.parallelExpireMs, current+durationMs)
+	assert.Equal(t, s.parallelExpireMs, current64+durationMs)
 }
 
 func TestGetParallel(t *testing.T) {
@@ -983,67 +983,67 @@ func TestGetParallel(t *testing.T) {
 	assert.Equal(t, 3, len(s.tunnels))
 
 	var delayMs uint32 = 200
-	var durationMs uint32 = 100
+	var durationMs uint64 = 100
 	var intervalMs uint32 = 150
 
 	s.SetParallelDelayMs(delayMs)
-	s.SetParallelDurationMs(durationMs)
+	s.SetParallelDurationMs(uint32(durationMs))
 	s.SetParallelIntervalMs(intervalMs)
 
-	current := currentMs()
+	_, current64 := currentMs()
 
-	parallel, trigger := s.getParallel(current, 0, 150)
+	parallel, trigger := s.getParallel(current64, 0, 150)
 	assert.Equal(t, 2, parallel)
 	assert.False(t, trigger)
 
 	s.primaryReceived = true
 	s.primaryReceivedTell = true
 
-	parallel, trigger = s.getParallel(current, 0, 150)
+	parallel, trigger = s.getParallel(current64, 0, 150)
 	assert.Equal(t, 1, parallel)
 	assert.False(t, trigger)
 
-	parallel, trigger = s.getParallel(current, 0, 250)
+	parallel, trigger = s.getParallel(current64, 0, 250)
 	assert.Equal(t, 2, parallel)
 	assert.True(t, trigger)
 
-	parallel, trigger = s.getParallel(current, 0, 340)
+	parallel, trigger = s.getParallel(current64, 0, 340)
 	assert.Equal(t, 2, parallel)
 	assert.False(t, trigger)
 
-	parallel, trigger = s.getParallel(current, 0, 350)
+	parallel, trigger = s.getParallel(current64, 0, 350)
 	assert.Equal(t, 3, parallel)
 	assert.False(t, trigger)
 
-	parallel, trigger = s.getParallel(current, 0, 500)
+	parallel, trigger = s.getParallel(current64, 0, 500)
 	assert.Equal(t, 3, parallel)
 	assert.False(t, trigger)
 
-	parallel, trigger = s.getParallel(current, 0, 150)
+	parallel, trigger = s.getParallel(current64, 0, 150)
 	assert.Equal(t, 3, parallel)
 	assert.False(t, trigger)
 
-	current += durationMs
+	current64 += durationMs
 
-	parallel, trigger = s.getParallel(current, 0, 150)
+	parallel, trigger = s.getParallel(current64, 0, 150)
 	assert.Equal(t, 3, parallel)
 	assert.False(t, trigger)
 
 	s.primaryReceived = true
 	s.primaryReceivedTell = true
 
-	parallel, trigger = s.getParallel(current, 0, 150)
+	parallel, trigger = s.getParallel(current64, 0, 150)
 	assert.Equal(t, 1, parallel)
 	assert.False(t, trigger)
 
 	s.SetUseParallel(true)
 
-	parallel, trigger = s.getParallel(current, 0, 150)
+	parallel, trigger = s.getParallel(current64, 0, 150)
 	assert.Equal(t, 3, parallel)
 	assert.False(t, trigger)
 
 	s.SetUseParallel(false)
-	parallel, trigger = s.getParallel(current, 0, 150)
+	parallel, trigger = s.getParallel(current64, 0, 150)
 	assert.Equal(t, 1, parallel)
 	assert.False(t, trigger)
 }
@@ -1068,10 +1068,10 @@ func TestParallelOutput(t *testing.T) {
 	s.SetParallelDurationMs(durationMs)
 	s.SetParallelIntervalMs(intervalMs)
 
-	current := currentMs()
+	_, current64 := currentMs()
 
 	buf := make([]byte, 100)
-	s.output(buf, current, 0, 0)
+	s.output(buf, current64, 0, 0)
 	assert.Equal(t, 2, len(s.msgss))
 	assert.Equal(t, 1, len(s.msgss[0]))
 	assert.Equal(t, 1, len(s.msgss[1]))
@@ -1091,7 +1091,7 @@ func TestParallelOutput(t *testing.T) {
 	s.primaryReceived = true
 	s.primaryReceivedTell = true
 
-	s.output(buf, current, 0, 0)
+	s.output(buf, current64, 0, 0)
 	assert.Equal(t, 2, len(s.msgss))
 	assert.Equal(t, 2, len(s.msgss[0]))
 	assert.Equal(t, 1, len(s.msgss[1]))
@@ -1102,7 +1102,7 @@ func TestParallelOutput(t *testing.T) {
 	assert.True(t, primaryReceived)
 	assert.Equal(t, FV2, fv)
 
-	s.output(buf, current, 0, 200)
+	s.output(buf, current64, 0, 200)
 
 	assert.Equal(t, 2, len(s.msgss))
 	assert.Equal(t, 3, len(s.msgss[0]))
@@ -1120,13 +1120,13 @@ func TestParallelOutput(t *testing.T) {
 	assert.False(t, primaryReceived)
 	assert.Equal(t, FV2, fv)
 
-	s.output(buf, current, 0, 350)
+	s.output(buf, current64, 0, 350)
 	assert.Equal(t, 3, len(s.msgss))
 	assert.Equal(t, 4, len(s.msgss[0]))
 	assert.Equal(t, 3, len(s.msgss[1]))
 	assert.Equal(t, 1, len(s.msgss[2]))
 
-	s.output(buf, current, 0, 500)
+	s.output(buf, current64, 0, 500)
 	assert.Equal(t, 5, len(s.msgss[0]))
 	assert.Equal(t, 4, len(s.msgss[1]))
 	assert.Equal(t, 2, len(s.msgss[2]))
@@ -1150,7 +1150,7 @@ func TestKcpFlush(t *testing.T) {
 	var delayts int
 	var outputcnt int
 
-	ouput := func(buf []byte, size int, current_, xmitMax_, delayts_ uint32) {
+	ouput := func(buf []byte, size int, current_ uint64, xmitMax_, delayts_ uint32) {
 		// current = current_
 		xmitMax = int(xmitMax_)
 		delayts = int(delayts_)
@@ -1477,7 +1477,7 @@ func TestUDPFileTransfer(t *testing.T) {
 }
 
 func TestAckXmit(t *testing.T) {
-	kcp := NewKCP(1, func(buf []byte, size int, current, xmitMax, delayts uint32) {})
+	kcp := NewKCP(1, func(buf []byte, size int, current uint64, xmitMax, delayts uint32) {})
 	for i := 0; i < IKCP_WND_RCV+2; i++ {
 		kcp.ack_push(uint32(i), 0)
 	}
@@ -1521,11 +1521,12 @@ func TestAckXmit(t *testing.T) {
 }
 
 func BenchmarkFlush(b *testing.B) {
-	kcp := NewKCP(1, func(buf []byte, size int, current, xmitMax, delayts uint32) {})
+	kcp := NewKCP(1, func(buf []byte, size int, current uint64, xmitMax, delayts uint32) {})
 	kcp.snd_buf = make([]segment, 1024)
 	for k := range kcp.snd_buf {
+		current, _ := currentMs()
 		kcp.snd_buf[k].xmit = 1
-		kcp.snd_buf[k].resendts = currentMs() + 10000
+		kcp.snd_buf[k].resendts = current + 10000
 	}
 	b.ResetTimer()
 	b.ReportAllocs()
