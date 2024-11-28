@@ -661,8 +661,6 @@ func (s *UDPStream) establish() {
 	currestab := atomic.AddUint64(&DefaultSnmp.CurrEstab, 1)
 	atomicSetMax(&DefaultSnmp.MaxConn, currestab)
 
-	s.parallelExpireMs = 30000
-
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.state = StateEstablish
